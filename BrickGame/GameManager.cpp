@@ -38,40 +38,39 @@ void GameManager::CreateBricks() {
 void GameManager::ApplyDifficultySettings() {
     float ballSpeedX = 2.0f, ballSpeedY = 2.0f;
     float paddleWidth = 100.0f;
+    float paddleX = 350.0f;
 
     switch (difficulty) {
         case Difficulty::Easy:
             ballSpeedX = 1.5f;
             ballSpeedY = 1.5f;
             paddleWidth = 140.0f;
+            paddleX = screenWidth / 2.0f - paddleWidth / 2.0f;
             lives = 5;
             break;
         case Difficulty::Normal:
             ballSpeedX = 2.0f;
             ballSpeedY = 2.0f;
             paddleWidth = 100.0f;
+            paddleX = screenWidth / 2.0f - paddleWidth / 2.0f;
             lives = 3;
             break;
         case Difficulty::Hard:
             ballSpeedX = 3.0f;
             ballSpeedY = 3.0f;
             paddleWidth = 70.0f;
+            paddleX = screenWidth / 2.0f - paddleWidth / 2.0f;
             lives = 2;
             break;
     }
 
-    Rectangle paddleRect = paddle.GetRect();
-    ball = Ball({ paddleRect.x + paddleRect.width / 2, paddleRect.y - 20 }, { ballSpeedX, ballSpeedY }, 10);
-    paddle = Paddle(paddleRect.x, paddleRect.y, paddleWidth, 20);
+    paddle = Paddle(paddleX, 550, paddleWidth, 20);
+    ball = Ball({ paddleX + paddleWidth / 2, 530 }, { ballSpeedX, ballSpeedY }, 10);
 }
 
 void GameManager::ResetGame() {
-    ball = Ball({ (float)screenWidth / 2, (float)screenHeight / 2 }, { 2, 2 }, 10);
-    ball.ResetSpeed();
-    paddle = Paddle(350, 550, 100, 20);
     CreateBricks();
     score = 0;
-    lives = 3;
     ApplyDifficultySettings();
 }
 
