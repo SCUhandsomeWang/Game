@@ -117,7 +117,13 @@ void GameManager::HandleInput() {
         }
     } else if (state == GameState::Playing) {
         if (IsKeyPressed(KEY_ESCAPE)) state = GameState::Settings;
-        paddle.SetCenterX((float)GetMouseX());
+
+        if (IsKeyDown(KEY_A)) {
+            paddle.MoveLeft(5.0f);
+        }
+        if (IsKeyDown(KEY_D)) {
+            paddle.MoveRight(5.0f);
+        }
     }
 }
 
