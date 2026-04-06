@@ -211,7 +211,7 @@ int main() {
         ball.Move();
         ball.BounceEdge(screenWidth, screenHeight);
 
-        paddle.SetCenterX((float)GetMouseX());
+        paddle.SetCenterX((float)GetMouseX(), screenWidth);
 
         if (ball.BounceRect(paddle.GetRect())) {
             // Collision with paddle

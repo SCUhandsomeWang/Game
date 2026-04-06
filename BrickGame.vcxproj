@@ -21,7 +21,7 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>18.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{2fb214e9-a62e-471d-b51c-92b3fcec662e}</ProjectGuid>
+    <ProjectGuid>{68CE90E2-0D18-270F-7EDE-F1371A6FF38E}</ProjectGuid>
     <RootNamespace>BrickGame</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
@@ -141,6 +141,12 @@
     <ClInclude Include="..\..\..\OneDrive\文档\xwechat_files\wxid_hl4rw2tw3o9722_3f97\msg\file\2026-03\week2_template\Ball.h" />
     <ClInclude Include="..\..\..\OneDrive\文档\xwechat_files\wxid_hl4rw2tw3o9722_3f97\msg\file\2026-03\week2_template\Brick.h" />
     <ClInclude Include="..\..\..\OneDrive\文档\xwechat_files\wxid_hl4rw2tw3o9722_3f97\msg\file\2026-03\week2_template\Paddle.h" />
+    <ClInclude Include="BrickGame\Ball_new.h" />
+    <ClInclude Include="BrickGame\Brick_new.h" />
+    <ClInclude Include="BrickGame\GameObject.h" />
+    <ClInclude Include="BrickGame\Paddle_new.h" />
+    <ClInclude Include="BrickGame\PhysicalObject.h" />
+    <ClInclude Include="BrickGame\VisualObject.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include=".gitignore" />

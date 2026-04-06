@@ -38,6 +38,24 @@
     <ClInclude Include="..\..\..\OneDrive\文档\xwechat_files\wxid_hl4rw2tw3o9722_3f97\msg\file\2026-03\week2_template\Paddle.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="BrickGame\GameObject.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="BrickGame\PhysicalObject.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="BrickGame\VisualObject.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="BrickGame\Ball_new.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="BrickGame\Paddle_new.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="BrickGame\Brick_new.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include=".gitignore" />
