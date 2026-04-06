@@ -1,0 +1,4 @@
+* [33mf0459dc[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mfeature/refactor-inheritance[m[33m, [m[1;31morigin/feature/refactor-inheritance[m[33m)[m Refactor: Implement inheritance-based class hierarchy (GameObject, PhysicalObject, VisualObject)
+* [33m7e51ac8[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/feature/game-over-display-score[m[33m, [m[1;32mmain[m[33m, [m[1;32mfeature/game-over-display-score[m[33m)[m Feature: Display final score on game over and victory screens
+* [33m12aad4a[m[33m ([m[1;31morigin/feature/speed-increase-on-collision[m[33m, [m[1;32mfeature/speed-increase-on-collision[m[33m)[m Feature: Ball speed increases on collision by 0.1x, capped at 3x initial speed
+* [33mb4b1d4e[m[33m ([m[1;31morigin/feature/red-ball[m[33m, [m[1;32mfeature/red-ball[m[33m)[m Initial commit

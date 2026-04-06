@@ -7,12 +7,11 @@ class GameObject {
 protected:
     Vector2 position;
 public:
-    GameObject(Vector2 pos = { 0, 0 }) : position(pos) {}
-    
+    GameObject(Vector2 pos) : position(pos) {}
     virtual ~GameObject() = default;
-    
     Vector2 GetPosition() const { return position; }
     void SetPosition(Vector2 pos) { position = pos; }
+    virtual void Draw() = 0;
 };
 
 #endif

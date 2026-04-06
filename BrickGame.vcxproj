@@ -134,17 +134,16 @@
   <ItemGroup>
     <ClCompile Include="..\..\..\OneDrive\文档\xwechat_files\wxid_hl4rw2tw3o9722_3f97\msg\file\2026-03\week2_template\Ball.cpp" />
     <ClCompile Include="..\..\..\OneDrive\文档\xwechat_files\wxid_hl4rw2tw3o9722_3f97\msg\file\2026-03\week2_template\Brick.cpp" />
-    <ClCompile Include="..\..\..\OneDrive\文档\xwechat_files\wxid_hl4rw2tw3o9722_3f97\msg\file\2026-03\week2_template\main.cpp" />
     <ClCompile Include="..\..\..\OneDrive\文档\xwechat_files\wxid_hl4rw2tw3o9722_3f97\msg\file\2026-03\week2_template\Paddle.cpp" />
+    <ClCompile Include="BrickGame\GameManager.cpp" />
+    <ClCompile Include="BrickGame\main.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\..\OneDrive\文档\xwechat_files\wxid_hl4rw2tw3o9722_3f97\msg\file\2026-03\week2_template\Ball.h" />
     <ClInclude Include="..\..\..\OneDrive\文档\xwechat_files\wxid_hl4rw2tw3o9722_3f97\msg\file\2026-03\week2_template\Brick.h" />
     <ClInclude Include="..\..\..\OneDrive\文档\xwechat_files\wxid_hl4rw2tw3o9722_3f97\msg\file\2026-03\week2_template\Paddle.h" />
-    <ClInclude Include="BrickGame\Ball_new.h" />
-    <ClInclude Include="BrickGame\Brick_new.h" />
+    <ClInclude Include="BrickGame\GameManager.h" />
     <ClInclude Include="BrickGame\GameObject.h" />
-    <ClInclude Include="BrickGame\Paddle_new.h" />
     <ClInclude Include="BrickGame\PhysicalObject.h" />
     <ClInclude Include="BrickGame\VisualObject.h" />
   </ItemGroup>

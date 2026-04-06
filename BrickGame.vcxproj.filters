@@ -15,9 +15,6 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\..\OneDrive\文档\xwechat_files\wxid_hl4rw2tw3o9722_3f97\msg\file\2026-03\week2_template\main.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\..\OneDrive\文档\xwechat_files\wxid_hl4rw2tw3o9722_3f97\msg\file\2026-03\week2_template\Ball.cpp">
       <Filter>头文件</Filter>
     </ClCompile>
@@ -26,6 +23,12 @@
     </ClCompile>
     <ClCompile Include="..\..\..\OneDrive\文档\xwechat_files\wxid_hl4rw2tw3o9722_3f97\msg\file\2026-03\week2_template\Paddle.cpp">
       <Filter>头文件</Filter>
+    </ClCompile>
+    <ClCompile Include="BrickGame\GameManager.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="BrickGame\main.cpp">
+      <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -38,22 +41,16 @@
     <ClInclude Include="..\..\..\OneDrive\文档\xwechat_files\wxid_hl4rw2tw3o9722_3f97\msg\file\2026-03\week2_template\Paddle.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="BrickGame\VisualObject.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
     <ClInclude Include="BrickGame\GameObject.h">
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="BrickGame\PhysicalObject.h">
       <Filter>头文件</Filter>
     </ClInclude>
-    <ClInclude Include="BrickGame\VisualObject.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="BrickGame\Ball_new.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="BrickGame\Paddle_new.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="BrickGame\Brick_new.h">
+    <ClInclude Include="BrickGame\GameManager.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>

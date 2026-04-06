@@ -3,21 +3,17 @@
 
 #include "GameObject.h"
 
-class PhysicalObject : public GameObject {
+class PhysicalObject : virtual public GameObject {
 protected:
     Vector2 velocity;
     float radius;
 public:
-    PhysicalObject(Vector2 pos = { 0, 0 }, Vector2 vel = { 0, 0 }, float r = 0.0f)
+    PhysicalObject(Vector2 pos, Vector2 vel, float r) 
         : GameObject(pos), velocity(vel), radius(r) {}
-    
     virtual ~PhysicalObject() = default;
-    
     Vector2 GetVelocity() const { return velocity; }
     void SetVelocity(Vector2 vel) { velocity = vel; }
-    
     float GetRadius() const { return radius; }
-    void SetRadius(float r) { radius = r; }
 };
 
 #endif
