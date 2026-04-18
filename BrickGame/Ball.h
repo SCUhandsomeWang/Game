@@ -13,13 +13,18 @@ private:
     int scoreValue;
     float maxSpeedMultiplier;
     float speedFactor;
+    bool launched;
 
 public:
     Ball(Vector2 pos, Vector2 vel, float r, Color c = RED, bool show = true, int score = 10)
-        : GameObject(pos), velocity(vel), initialVelocity(vel), radius(r), color(c), visible(show), scoreValue(score), maxSpeedMultiplier(1.0f), speedFactor(1.0f) {
+        : GameObject(pos), velocity(vel), initialVelocity(vel), radius(r), color(c), visible(show), scoreValue(score), maxSpeedMultiplier(1.0f), speedFactor(1.0f), launched(false) {
     }
 
     void Update() override {
+        if (!launched) {
+            return;
+        }
+
         position.x += velocity.x * speedFactor;
         position.y += velocity.y * speedFactor;
 
@@ -109,6 +114,18 @@ public:
 
     void SetSpeedFactor(float factor) {
         speedFactor = factor;
+    }
+
+    bool IsLaunched() const {
+        return launched;
+    }
+
+    void Launch() {
+        launched = true;
+    }
+
+    void ResetLaunchState() {
+        launched = false;
     }
 };
 

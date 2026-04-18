@@ -148,10 +148,13 @@ int main() {
         }
     };
 
-    auto SpawnBall = [&](Vector2 pos, Vector2 velocity, int scoreValue) {
+    auto SpawnBall = [&](Vector2 pos, Vector2 velocity, int scoreValue, bool launched = false) {
         Ball* newBall = new Ball(pos, velocity, 10, RED, true, scoreValue);
         if (frenzyActive) {
             newBall->SetSpeedFactor(2.0f);
+        }
+        if (launched) {
+            newBall->Launch();
         }
         balls.push_back(newBall);
         objects.push_back(newBall);
@@ -274,7 +277,7 @@ int main() {
         config = GetDifficultyConfig(selectedDifficulty);
         rowsCount = config.rows;
         basePaddleWidth = config.paddleWidth;
-        SpawnBall({ (float)screenWidth / 2, (float)screenHeight / 2 }, config.ballSpeed, 10);
+        SpawnBall({ (float)screenWidth / 2, (float)screenHeight / 2 }, config.ballSpeed, 10, false);
         paddle = new Paddle(350, 550, basePaddleWidth, 20);
         objects.push_back(paddle);
         CreateBricks();
@@ -300,7 +303,7 @@ int main() {
         balls.clear();
 
         Rectangle paddleRect = paddle->GetRect();
-        SpawnBall({ paddleRect.x + paddleRect.width / 2, paddleRect.y - 20 }, config.ballSpeed, 10);
+        SpawnBall({ paddleRect.x + paddleRect.width / 2, paddleRect.y - 20 }, config.ballSpeed, 10, false);
     };
 
     CreateGameObjects();
@@ -535,8 +538,25 @@ int main() {
             continue;
         }
 
+        if (IsKeyPressed(KEY_SPACE)) {
+            for (Ball* ball : balls) {
+                if (!ball->IsLaunched()) {
+                    ball->Launch();
+                }
+            }
+        }
+
         for (GameObject* object : objects) {
             object->Update();
+        }
+
+        if (paddle != nullptr) {
+            Rectangle paddleRect = paddle->GetRect();
+            for (Ball* ball : balls) {
+                if (!ball->IsLaunched()) {
+                    ball->SetPosition({ paddleRect.x + paddleRect.width / 2, paddleRect.y - ball->GetRadius() - 1.0f });
+                }
+            }
         }
 
         UpdateVfx(dt);
@@ -569,10 +589,16 @@ int main() {
             Rectangle paddleRect = paddle->GetRect();
 
             for (Ball* ball : balls) {
+                if (!ball->IsLaunched()) {
+                    continue;
+                }
                 ball->BounceRect(paddleRect);
             }
 
             for (Ball* ball : balls) {
+                if (!ball->IsLaunched()) {
+                    continue;
+                }
                 bool hitBrick = false;
                 for (Brick* brick : bricks) {
                     if (!brick->IsActive()) {
@@ -633,8 +659,8 @@ int main() {
                             float vy = sourceVel.y;
                             Vector2 v1 = { vx * 0.6f - vy * 0.8f, vx * 0.8f + vy * 0.6f };
                             Vector2 v2 = { vx * 0.6f + vy * 0.8f, -vx * 0.8f + vy * 0.6f };
-                            SpawnBall(sourcePos, v1, source->GetScoreValue());
-                            SpawnBall(sourcePos, v2, source->GetScoreValue());
+                            SpawnBall(sourcePos, v1, source->GetScoreValue(), true);
+                            SpawnBall(sourcePos, v2, source->GetScoreValue(), true);
                         }
                     }
                     else if (type == PowerUpType::WidePaddle) {
@@ -671,7 +697,7 @@ int main() {
 
             for (size_t i = 0; i < balls.size();) {
                 Ball* ball = balls[i];
-                if (ball->IsOutOfBounds(screenHeight)) {
+                if (ball->IsLaunched() && ball->IsOutOfBounds(screenHeight)) {
                     RemoveObject(ball);
                     delete ball;
                     balls.erase(balls.begin() + (int)i);
@@ -726,6 +752,17 @@ int main() {
         }
         if (frenzyActive) {
             DrawHudCard({ 18, 58, 170, 40 }, "FRENZY x4", neonPink);
+        }
+
+        bool waitingForLaunch = false;
+        for (Ball* ball : balls) {
+            if (!ball->IsLaunched()) {
+                waitingForLaunch = true;
+                break;
+            }
+        }
+        if (waitingForLaunch) {
+            DrawHudCard({ 290, 58, 220, 40 }, "PRESS SPACE TO LAUNCH", neonBlue);
         }
 
         DrawHudCard({ 560, 58, 220, 40 }, "LIVES", neonBlue);
