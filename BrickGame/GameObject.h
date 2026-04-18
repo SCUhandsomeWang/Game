@@ -1,0 +1,29 @@
+#ifndef GAMEOBJECT_H
+#define GAMEOBJECT_H
+
+#include "raylib.h"
+
+class GameObject {
+protected:
+    Vector2 position;
+
+public:
+    GameObject(Vector2 pos = { 0, 0 }) : position(pos) {
+    }
+
+    virtual ~GameObject() {
+    }
+
+    virtual void Update() = 0;
+    virtual void Draw() = 0;
+
+    Vector2 GetPosition() const {
+        return position;
+    }
+
+    void SetPosition(Vector2 pos) {
+        position = pos;
+    }
+};
+
+#endif

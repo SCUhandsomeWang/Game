@@ -1,22 +1,58 @@
 #ifndef PADDLE_H
 #define PADDLE_H
 
-#include "raylib.h"
+#include "GameObject.h"
 
-class Paddle {
+class Paddle : public GameObject {
 private:
-    Rectangle rect;
-    float minY;  // 允许的最小 Y 坐标
-    float maxY;  // 允许的最大 Y 坐标
+    float width;
+    float height;
+    Color color;
+
 public:
-    Paddle(float x, float y, float w, float h);
-    void Draw();
-    void MoveLeft(float speed);
-    void MoveRight(float speed);
-    void SetCenterX(float cx);
-    void SetCenter(float cx, float cy);  // 同时设置 X 和 Y，并限制范围
-    void SetMovementBounds(float minY, float maxY);
-    Rectangle GetRect() const;
+    Paddle(float x, float y, float w, float h, Color c = BLUE)
+        : GameObject({ x, y }), width(w), height(h), color(c) {
+    }
+
+    void Update() override {
+        position.x = (float)GetMouseX() - width / 2.0f;
+        if (position.x < 0) position.x = 0;
+        if (position.x + width > GetScreenWidth()) {
+            position.x = GetScreenWidth() - width;
+        }
+    }
+
+    void Draw() override {
+        DrawRectangleRec(GetRect(), color);
+    }
+
+    void SetCenterX(float cx) {
+        position.x = cx - width / 2.0f;
+        if (position.x < 0) position.x = 0;
+        if (position.x + width > GetScreenWidth()) {
+            position.x = GetScreenWidth() - width;
+        }
+    }
+
+    Rectangle GetRect() const {
+        return { position.x, position.y, width, height };
+    }
+
+    float GetWidth() const {
+        return width;
+    }
+
+    void SetWidth(float newWidth) {
+        float centerX = position.x + width / 2.0f;
+        width = newWidth;
+        position.x = centerX - width / 2.0f;
+        if (position.x < 0) {
+            position.x = 0;
+        }
+        if (position.x + width > GetScreenWidth()) {
+            position.x = GetScreenWidth() - width;
+        }
+    }
 };
 
 #endif
