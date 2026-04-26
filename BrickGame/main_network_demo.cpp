@@ -5,6 +5,10 @@
 #include <cstdio>
 #include <string>
 
+#ifdef DrawText
+#undef DrawText
+#endif
+
 // 这是一个演示网络功能的简化游戏实现
 // 支持单机双实例通过本地网络通信，实现双人合作模式
 

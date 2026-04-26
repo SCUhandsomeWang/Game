@@ -3,6 +3,7 @@
 
 #include "NetworkManager.h"
 #include "Interpolation.h"
+#include "NetworkConfig.h"
 #include "raylib.h"
 #include <cstdio>
 
@@ -24,6 +25,8 @@ public:
         // 初始化平滑对象
         remotePaddleInterp = InterpolationSmoothing::CreatePaddleInterpolation({0, 0});
         remoteBallInterp = InterpolationSmoothing::CreateBallInterpolation({0, 0});
+        remoteBallInterp.interpolationSpeed = NetworkConfig::BALL_INTERPOLATION_SPEED;
+        remotePaddleInterp.interpolationSpeed = NetworkConfig::PADDLE_INTERPOLATION_SPEED;
     }
     
     ~NetworkGameMode() {
@@ -74,7 +77,7 @@ public:
             // 更新远程球的插值目标
             remoteBallInterp.targetPos = gameState.ball.GetPosition();
             remoteBallInterp.isInterpolating = true;
-            remoteBallInterp.interpolationSpeed = 0.2f;
+            remoteBallInterp.interpolationSpeed = NetworkConfig::BALL_INTERPOLATION_SPEED;
             
             // 更新远程板的插值目标（取决于是主机还是客户端）
             if (GetMode() == NetworkManager::Mode::CLIENT) {
@@ -83,7 +86,7 @@ public:
                 remotePaddleInterp.targetPos = gameState.guestPaddle.GetPosition();
             }
             remotePaddleInterp.isInterpolating = true;
-            remotePaddleInterp.interpolationSpeed = 0.25f;
+            remotePaddleInterp.interpolationSpeed = NetworkConfig::PADDLE_INTERPOLATION_SPEED;
         }
         
         // 处理接收到的板更新

@@ -3,6 +3,10 @@
 #include <string>
 #include <cstdio>
 
+#ifdef DrawText
+#undef DrawText
+#endif
+
 int main() {
     InitWindow(800, 600, "Brick Breaker - Network Mode");
     SetExitKey(KEY_NULL);
@@ -19,7 +23,6 @@ int main() {
     };
 
     MenuState menuState = MenuState::MAIN_MENU;
-    NetworkGameMode::Mode selectedNetworkMode = NetworkGameMode::Mode::OFFLINE;
     NetworkGameMode networkGame;
     
     // UI配置
@@ -33,6 +36,11 @@ int main() {
 
     std::string clientIP = "127.0.0.1";
     int selectedPort = 5555;
+    bool editingClientIP = false;
+
+    auto IsValidIPChar = [](int key) {
+        return (key >= '0' && key <= '9') || key == '.';
+    };
     
     auto DrawSciFiBackground = [&](float timeNow) {
         DrawRectangleGradientV(0, 0, screenWidth, screenHeight, { 5, 8, 22, 255 }, { 2, 2, 10, 255 });
@@ -143,13 +151,12 @@ int main() {
 
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
                 if (hoverHost) {
-                    selectedNetworkMode = NetworkGameMode::Mode::HOST;
                     menuState = MenuState::HOST_WAITING;
                     networkGame.StartAsHost(selectedPort);
                 }
                 if (hoverClient) {
-                    selectedNetworkMode = NetworkGameMode::Mode::CLIENT;
                     menuState = MenuState::CLIENT_CONNECT;
+                    editingClientIP = true;
                 }
                 if (hoverBack) {
                     menuState = MenuState::MAIN_MENU;
@@ -203,8 +210,20 @@ int main() {
             int titleWidth = MeasureText(title, titleSize);
             DrawText(title, screenWidth / 2 - titleWidth / 2, 120, titleSize, RAYWHITE);
 
-            DrawText("Default: 127.0.0.1 (Local Network)", 150, 240, 18, Fade(neonCyan, 0.8f));
-            DrawText("Press Enter to connect", 150, 320, 18, Fade(neonBlue, 0.7f));
+            DrawText("Enter HOST IP for LAN / local testing", 150, 220, 18, Fade(neonCyan, 0.8f));
+
+            Rectangle ipBox = { 150, 250, 500, 44 };
+            DrawRectangleRounded(ipBox, 0.2f, 6, Fade(panelDark, 0.95f));
+            DrawRectangleRoundedLines(ipBox, 0.2f, 6, editingClientIP ? neonCyan : Fade(neonBlue, 0.8f));
+
+            std::string displayIP = clientIP;
+            if (editingClientIP && ((int)(GetTime() * 2.0f) % 2 == 0)) {
+                displayIP += "_";
+            }
+            DrawText(displayIP.c_str(), 170, 260, 20, RAYWHITE);
+
+            DrawText("Digits and dots only. Press Backspace to delete.", 150, 320, 16, Fade(neonBlue, 0.7f));
+            DrawText("Press Enter to connect", 150, 350, 18, Fade(neonBlue, 0.9f));
 
             bool hoverBack = CheckCollisionPointRec(mp, backButton);
             DrawNeonButton(backButton, "BACK", hoverBack, false, { 150, 150, 150, 255 });
@@ -212,10 +231,30 @@ int main() {
             EndDrawing();
 
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hoverBack) {
+                editingClientIP = false;
                 menuState = MenuState::MAIN_MENU;
             }
 
+            if (editingClientIP) {
+                int key = GetCharPressed();
+                while (key > 0) {
+                    if (IsValidIPChar(key) && clientIP.size() < 15) {
+                        clientIP.push_back((char)key);
+                    }
+                    key = GetCharPressed();
+                }
+
+                if (IsKeyPressed(KEY_BACKSPACE) && !clientIP.empty()) {
+                    clientIP.pop_back();
+                }
+            }
+
             if (IsKeyPressed(KEY_ENTER)) {
+                editingClientIP = false;
+                if (clientIP.empty()) {
+                    clientIP = "127.0.0.1";
+                }
+
                 if (networkGame.ConnectAsClient(clientIP.c_str(), selectedPort)) {
                     printf("[Network] Connecting to %s:%d\n", clientIP.c_str(), selectedPort);
                     menuState = MenuState::NETWORK_PLAYING;

@@ -7,6 +7,18 @@
 #include <string>
 
 #ifdef _WIN32
+    #ifndef WIN32_LEAN_AND_MEAN
+    #define WIN32_LEAN_AND_MEAN
+    #endif
+    #ifndef NOMINMAX
+    #define NOMINMAX
+    #endif
+    #ifndef NOGDI
+    #define NOGDI
+    #endif
+    #ifndef NOUSER
+    #define NOUSER
+    #endif
     #include <winsock2.h>
     #include <ws2tcpip.h>
     #pragma comment(lib, "Ws2_32.lib")
@@ -34,7 +46,7 @@ public:
         DISCONNECTED,
         CONNECTING,
         CONNECTED,
-        ERROR
+        FAILED
     };
 
 private:
@@ -93,7 +105,7 @@ public:
         // 创建UDP套接字
         udpSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         if (udpSocket == INVALID_SOCKET) {
-            connectionStatus = ConnectionStatus::ERROR;
+            connectionStatus = ConnectionStatus::FAILED;
             return false;
         }
         
@@ -106,7 +118,7 @@ public:
         if (bind(udpSocket, (sockaddr*)&bindAddr, sizeof(bindAddr)) == SOCKET_ERROR) {
             closesocket(udpSocket);
             udpSocket = INVALID_SOCKET;
-            connectionStatus = ConnectionStatus::ERROR;
+            connectionStatus = ConnectionStatus::FAILED;
             return false;
         }
         
@@ -124,7 +136,7 @@ public:
         // 创建UDP套接字
         udpSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         if (udpSocket == INVALID_SOCKET) {
-            connectionStatus = ConnectionStatus::ERROR;
+            connectionStatus = ConnectionStatus::FAILED;
             return false;
         }
         
@@ -140,7 +152,7 @@ public:
         HelloMessage hello;
         hello.isHost = false;
         strcpy_s(hello.playerName, sizeof(hello.playerName), "Client");
-        SendMessage((uint8_t*)&hello, hello.GetSize());
+        SendPacket((uint8_t*)&hello, hello.GetSize());
         
         connectionStatus = ConnectionStatus::CONNECTED;
         return true;
@@ -156,7 +168,7 @@ public:
     bool IsConnected() const { return connectionStatus == ConnectionStatus::CONNECTED; }
     
     // 发送原始消息
-    bool SendMessage(const uint8_t* data, size_t length) {
+    bool SendPacket(const uint8_t* data, size_t length) {
         if (!IsConnected() || udpSocket == INVALID_SOCKET) {
             return false;
         }
@@ -169,13 +181,13 @@ public:
     // 发送游戏状态
     bool SendGameState(const GameStateMessage& state) {
         if (currentMode != Mode::HOST) return false;
-        return SendMessage((uint8_t*)&state, state.GetSize());
+        return SendPacket((uint8_t*)&state, state.GetSize());
     }
     
     // 发送板位置更新
     bool SendPaddleUpdate(const PaddleUpdateMessage& update) {
         if (currentMode != Mode::CLIENT) return false;
-        return SendMessage((uint8_t*)&update, update.GetSize());
+        return SendPacket((uint8_t*)&update, update.GetSize());
     }
     
     // 接收消息
@@ -221,7 +233,7 @@ public:
                         HelloMessage response;
                         response.isHost = true;
                         strcpy_s(response.playerName, sizeof(response.playerName), "Host");
-                        SendMessage((uint8_t*)&response, response.GetSize());
+                        SendPacket((uint8_t*)&response, response.GetSize());
                     }
                     break;
                     
