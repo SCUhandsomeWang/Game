@@ -103,12 +103,12 @@ public:
     }
     
     // 获取远程球的平滑位置
-    Vector2 GetRemoteBallPosition() const {
+    const Vector2& GetRemoteBallPosition() const {
         return networkGame.GetRemoteBallPosition();
     }
     
     // 获取远程板的平滑位置
-    Vector2 GetRemotePaddlePosition() const {
+    const Vector2& GetRemotePaddlePosition() const {
         return networkGame.GetRemotePaddlePosition();
     }
     

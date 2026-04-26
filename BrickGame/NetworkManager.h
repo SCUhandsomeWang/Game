@@ -279,6 +279,11 @@ public:
         }
         return false;
     }
+    
+    // 获取网络管理器信息用于游戏集成
+    const sockaddr_in& GetRemoteAddress() const {
+        return remoteAddress;
+    }
 
 private:
     // 设置非阻塞模式

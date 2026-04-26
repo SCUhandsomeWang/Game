@@ -1,5 +1,6 @@
+#include "raylib.h"
 #include "GameApp.h"
-#include "NetworkGameApp.h"
+#include "NetworkGameMode.h"
 #include "NetworkConfig.h"
 #include <cstdio>
 #include <string>
@@ -9,17 +10,17 @@
 
 int main(int argc, char* argv[]) {
     // 检查命令行参数
-    NetworkGameApp::Mode mode = NetworkGameApp::Mode::OFFLINE;
+    NetworkManager::Mode mode = NetworkManager::Mode::OFFLINE;
     int port = NetworkConfig::DEFAULT_PORT;
     std::string hostIP = NetworkConfig::LOCALHOST;
     
     if (argc > 1) {
         std::string arg = argv[1];
         if (arg == "--host" || arg == "-h") {
-            mode = NetworkGameApp::Mode::HOST;
+            mode = NetworkManager::Mode::HOST;
             printf("[Main] Starting as HOST\n");
         } else if (arg == "--client" || arg == "-c") {
-            mode = NetworkGameApp::Mode::CLIENT;
+            mode = NetworkManager::Mode::CLIENT;
             if (argc > 2) {
                 hostIP = argv[2];
             }
@@ -27,7 +28,7 @@ int main(int argc, char* argv[]) {
         }
     }
     
-    if (mode == NetworkGameApp::Mode::OFFLINE) {
+    if (mode == NetworkManager::Mode::OFFLINE) {
         // 运行原始离线游戏
         printf("[Main] Starting in OFFLINE mode\n");
         GameApp app;
@@ -39,14 +40,14 @@ int main(int argc, char* argv[]) {
     SetExitKey(KEY_NULL);
     SetTargetFPS(60);
     
-    NetworkGameApp networkGame;
+    NetworkGameMode networkGame;
     
     // 连接网络
     bool connected = false;
-    if (mode == NetworkGameApp::Mode::HOST) {
+    if (mode == NetworkManager::Mode::HOST) {
         connected = networkGame.StartAsHost(port);
-    } else if (mode == NetworkGameApp::Mode::CLIENT) {
-        connected = networkGame.StartAsClient(hostIP.c_str(), port);
+    } else if (mode == NetworkManager::Mode::CLIENT) {
+        connected = networkGame.ConnectAsClient(hostIP.c_str(), port);
     }
     
     if (!connected) {
@@ -61,7 +62,7 @@ int main(int argc, char* argv[]) {
     const float CONNECTION_CHECK_INTERVAL = 0.5f;
     
     printf("[Main] Network connection established\n");
-    printf("[Main] Network mode: %s\n", mode == NetworkGameApp::Mode::HOST ? "HOST" : "CLIENT");
+    printf("[Main] Network mode: %s\n", mode == NetworkManager::Mode::HOST ? "HOST" : "CLIENT");
     printf("[Main] Press ESC to exit\n");
     
     while (running && !WindowShouldClose()) {
@@ -94,16 +95,16 @@ int main(int argc, char* argv[]) {
             // 绘示示例信息
             char modeText[64];
             snprintf(modeText, sizeof(modeText), "Mode: %s", 
-                    mode == NetworkGameApp::Mode::HOST ? "HOST" : "CLIENT");
-            DrawText(modeText, 300, 160, 18, CYAN);
+                    mode == NetworkManager::Mode::HOST ? "HOST" : "CLIENT");
+            DrawText(modeText, 300, 160, 18, {40, 240, 255, 255});
             
             // 演示远程球位置
-            Vector2 ballPos = networkGame.GetRemoteBallPosition();
+            const Vector2& ballPos = networkGame.GetRemoteBallPosition();
             DrawCircle((int)ballPos.x, (int)ballPos.y, 8, RED);
             
             // 演示远程板位置
-            Rectangle remotePaddle = networkGame.GetRemotePaddleRect();
-            DrawRectangleRec(remotePaddle, BLUE);
+            const Vector2& paddlePos = networkGame.GetRemotePaddlePosition();
+            DrawRectangle((int)paddlePos.x, (int)paddlePos.y, 100, 20, BLUE);
             
             // 显示同步信息
             DrawText("Ball Position Synced from Remote", 250, 250, 16, YELLOW);
@@ -114,7 +115,7 @@ int main(int argc, char* argv[]) {
             
             char paddlePosText[128];
             snprintf(paddlePosText, sizeof(paddlePosText), 
-                    "Remote Paddle: X=%.1f Y=%.1f", remotePaddle.x, remotePaddle.y);
+                    "Remote Paddle: X=%.1f Y=%.1f", paddlePos.x, paddlePos.y);
             DrawText(paddlePosText, 250, 310, 14, WHITE);
             
             DrawText("Network synchronization working!", 250, 380, 16, GREEN);

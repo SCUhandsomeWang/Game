@@ -6,44 +6,21 @@
 #include "raylib.h"
 #include <cstdio>
 
+// 网络游戏模式高层包装器 - 处理插值和游戏集成
 class NetworkGameMode {
-public:
-    enum class Mode {
-        OFFLINE,
-        HOST,
-        CLIENT
-    };
-
-    enum class ConnectionStatus {
-        CONNECTING,
-        CONNECTED,
-        DISCONNECTED,
-        ERROR
-    };
-
 private:
-    Mode gameMode;
-    ConnectionStatus connectionStatus;
     NetworkManager networkManager;
     
     // 远程板位置平滑
     InterpolationSmoothing::InterpolatedObject remotePaddleInterp;
     InterpolationSmoothing::InterpolatedObject remoteBallInterp;
-    InterpolationSmoothing::PositionPredictor ballPredictor;
-    
-    // 上次发送状态的时间
-    float lastStateSendTime;
     
     // 游戏状态缓存
     GameStateMessage lastReceivedState;
     PaddleUpdateMessage lastReceivedPaddleUpdate;
 
 public:
-    NetworkGameMode() 
-        : gameMode(Mode::OFFLINE),
-          connectionStatus(ConnectionStatus::DISCONNECTED),
-          lastStateSendTime(0) {
-        
+    NetworkGameMode() {
         // 初始化平滑对象
         remotePaddleInterp = InterpolationSmoothing::CreatePaddleInterpolation({0, 0});
         remoteBallInterp = InterpolationSmoothing::CreateBallInterpolation({0, 0});
@@ -53,49 +30,36 @@ public:
         Disconnect();
     }
     
-    // 作为主机启动网络游戏
+    // 委托到NetworkManager的方法
     bool StartAsHost(int port = 5555) {
-        gameMode = Mode::HOST;
-        
-        if (networkManager.StartAsHost(port)) {
-            connectionStatus = ConnectionStatus::CONNECTED;
-            printf("[Network] Started as HOST on port %d\n", port);
-            return true;
-        }
-        
-        connectionStatus = ConnectionStatus::ERROR;
-        printf("[Network] Failed to start as HOST\n");
-        return false;
+        return networkManager.StartAsHost(port);
     }
     
-    // 作为客户端连接到主机
     bool ConnectAsClient(const char* hostIP, int port = 5555) {
-        gameMode = Mode::CLIENT;
-        
-        if (networkManager.ConnectAsClient(hostIP, port)) {
-            connectionStatus = ConnectionStatus::CONNECTED;
-            printf("[Network] Connected to HOST at %s:%d\n", hostIP, port);
-            return true;
-        }
-        
-        connectionStatus = ConnectionStatus::ERROR;
-        printf("[Network] Failed to connect to HOST\n");
-        return false;
+        return networkManager.ConnectAsClient(hostIP, port);
     }
     
-    // 获取当前游戏模式
-    Mode GetMode() const { return gameMode; }
-    
-    // 获取连接状态
-    ConnectionStatus GetStatus() const { return connectionStatus; }
-    
-    // 检查是否连接
     bool IsConnected() const { 
-        return connectionStatus == ConnectionStatus::CONNECTED && 
-               networkManager.IsConnected(); 
+        return networkManager.IsConnected(); 
     }
     
-    // 更新网络通信
+    NetworkManager::Mode GetMode() const { 
+        return networkManager.GetMode(); 
+    }
+    
+    NetworkManager::ConnectionStatus GetStatus() const { 
+        return networkManager.GetStatus(); 
+    }
+    
+    bool SendGameState(const GameStateMessage& state) {
+        return networkManager.SendGameState(state);
+    }
+    
+    bool SendPaddleUpdate(const PaddleUpdateMessage& update) {
+        return networkManager.SendPaddleUpdate(update);
+    }
+    
+    // 高层功能 - 处理插值和同步
     void Update(float deltaTime) {
         if (!IsConnected()) return;
         
@@ -113,7 +77,7 @@ public:
             remoteBallInterp.interpolationSpeed = 0.2f;
             
             // 更新远程板的插值目标（取决于是主机还是客户端）
-            if (gameMode == Mode::CLIENT) {
+            if (GetMode() == NetworkManager::Mode::CLIENT) {
                 remotePaddleInterp.targetPos = gameState.hostPaddle.GetPosition();
             } else {
                 remotePaddleInterp.targetPos = gameState.guestPaddle.GetPosition();
@@ -135,30 +99,13 @@ public:
         InterpolationSmoothing::UpdateInterpolation(remotePaddleInterp, deltaTime);
     }
     
-    // 发送游戏状态（主机）
-    bool SendGameState(const GameStateMessage& state) {
-        lastStateSendTime += GetFrameTime();
-        
-        // 根据配置的间隔发送状态
-        if (networkManager.ShouldUpdateState(GetFrameTime())) {
-            return networkManager.SendGameState(state);
-        }
-        
-        return false;
-    }
-    
-    // 发送板位置更新（客户端）
-    bool SendPaddleUpdate(const PaddleUpdateMessage& update) {
-        return networkManager.SendPaddleUpdate(update);
-    }
-    
     // 获取远程球的当前（平滑后的）位置
-    Vector2 GetRemoteBallPosition() const {
+    const Vector2& GetRemoteBallPosition() const {
         return remoteBallInterp.currentPos;
     }
     
     // 获取远程板的当前（平滑后的）位置
-    Vector2 GetRemotePaddlePosition() const {
+    const Vector2& GetRemotePaddlePosition() const {
         return remotePaddleInterp.currentPos;
     }
     
@@ -172,22 +119,8 @@ public:
         return lastReceivedPaddleUpdate;
     }
     
-    // 设置网络状态更新频率（Hz）
-    void SetStateUpdateRate(float hz) {
-        networkManager.SetStateUpdateInterval(hz);
-    }
-    
-    // 断开连接
     void Disconnect() {
         networkManager.Shutdown();
-        gameMode = Mode::OFFLINE;
-        connectionStatus = ConnectionStatus::DISCONNECTED;
-        printf("[Network] Disconnected\n");
-    }
-    
-    // 获取网络管理器的引用（高级用途）
-    NetworkManager& GetNetworkManager() {
-        return networkManager;
     }
 };
 
