@@ -4,7 +4,7 @@
     {
       "label": "Build BrickGame (raylib)",
       "type": "shell",
-      "command": "Get-Process BrickGame -ErrorAction SilentlyContinue | Stop-Process -Force; New-Item -ItemType Directory -Path '${workspaceFolder}/BrickGame/build' -Force | Out-Null; g++ -std=c++17 -g -Wall -Wextra -IC:/raylib-5.5/raylib-5.5_win64_mingw-w64/include BrickGame/main.cpp BrickGame/Ball.cpp BrickGame/Paddle.cpp BrickGame/Brick.cpp -LC:/raylib-5.5/raylib-5.5_win64_mingw-w64/lib -lraylib -lopengl32 -lgdi32 -lwinmm -o BrickGame/build/BrickGame.exe",
+      "command": "Get-Process BrickGame -ErrorAction SilentlyContinue | Stop-Process -Force; New-Item -ItemType Directory -Path '${workspaceFolder}/BrickGame/build' -Force | Out-Null; g++ -std=c++17 -g -Wall -Wextra -IC:/raylib-5.5/raylib-5.5_win64_mingw-w64/include -I\"C:/Users/wanghan/安装的软件/enet-1.3.18/enet-1.3.18/include\" BrickGame/main.cpp BrickGame/Ball.cpp BrickGame/Paddle.cpp BrickGame/Brick.cpp -LC:/raylib-5.5/raylib-5.5_win64_mingw-w64/lib -L\"C:/Users/wanghan/安装的软件/enet-1.3.18/enet-1.3.18\" -l:enet64.lib -lraylib -lopengl32 -lgdi32 -lwinmm -lws2_32 -o BrickGame/build/BrickGame.exe",
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -18,6 +18,21 @@
       "detail": "Build BrickGame with raylib (MinGW on Windows)"
     },
     {
+      "label": "Build BrickGame Network",
+      "type": "shell",
+      "command": "Get-Process BrickGame -ErrorAction SilentlyContinue | Stop-Process -Force; New-Item -ItemType Directory -Path '${workspaceFolder}/BrickGame/build' -Force | Out-Null; g++ -std=c++17 -g -Wall -Wextra -IC:/raylib-5.5/raylib-5.5_win64_mingw-w64/include BrickGame/main_network.cpp BrickGame/Ball.cpp BrickGame/Paddle.cpp BrickGame/Brick.cpp -LC:/raylib-5.5/raylib-5.5_win64_mingw-w64/lib -lraylib -lopengl32 -lgdi32 -lwinmm -lws2_32 -o BrickGame/build/BrickGameNetwork.exe",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": {
+        "kind": "build"
+      },
+      "problemMatcher": [
+        "$gcc"
+      ],
+      "detail": "Build BrickGame with Network support (MinGW on Windows)"
+    },
+    {
       "label": "Run BrickGame",
       "type": "shell",
       "command": "${workspaceFolder}/BrickGame/build/BrickGame.exe",
@@ -26,6 +41,41 @@
       },
       "dependsOn": "Build BrickGame (raylib)",
       "problemMatcher": []
-    }
+    },
+    {
+      "label": "Build BrickGame Network Demo",
+      "type": "shell",
+      "command": "Get-Process BrickGame* -ErrorAction SilentlyContinue | Stop-Process -Force; New-Item -ItemType Directory -Path '${workspaceFolder}/BrickGame/build' -Force | Out-Null; g++ -std=c++17 -g -Wall -Wextra -IC:/raylib-5.5/raylib-5.5_win64_mingw-w64/include BrickGame/main_network_demo.cpp BrickGame/Ball.cpp BrickGame/Paddle.cpp BrickGame/Brick.cpp -LC:/raylib-5.5/raylib-5.5_win64_mingw-w64/lib -lraylib -lopengl32 -lgdi32 -lwinmm -lws2_32 -o BrickGame/build/BrickGameDemo.exe",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": {
+        "kind": "build"
+      },
+      "problemMatcher": [
+        "$gcc"
+      ],
+      "detail": "Build BrickGame Network Demo (MinGW on Windows)"
+    },
+    {
+      "label": "Run BrickGame Network Demo (Host)",
+      "type": "shell",
+      "command": "${workspaceFolder}/BrickGame/build/BrickGameDemo.exe --host",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "dependsOn": "Build BrickGame Network Demo",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run BrickGame Network Demo (Client)",
+      "type": "shell",
+      "command": "${workspaceFolder}/BrickGame/build/BrickGameDemo.exe --client 127.0.0.1",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "dependsOn": "Build BrickGame Network Demo",
+      "problemMatcher": []
+    },
   ]
 }

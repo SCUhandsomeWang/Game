@@ -1,12 +1,31 @@
 #ifndef GAMEAPP_H
 #define GAMEAPP_H
 
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef NOGDI
+#define NOGDI
+#endif
+#ifndef NOUSER
+#define NOUSER
+#endif
+#endif
+
 #include "raylib.h"
 #include "Ball.h"
 #include "Paddle.h"
 #include "Brick.h"
 #include "PowerUp.h"
+#include <enet/enet.h>
+#include <algorithm>
 #include <vector>
+#include <cstdint>
+#include <cstring>
 #include <cstdlib>
 #include <ctime>
 #include <cstdio>
@@ -70,6 +89,69 @@ static const char* GetDifficultyLabel(Difficulty difficulty) {
     }
 }
 
+enum class NetMode {
+    Offline,
+    Host,
+    Client
+};
+
+enum class PacketType : uint8_t {
+    HostStart = 1,
+    ClientInput = 2,
+    Snapshot = 3
+};
+
+static const int kNetMaxBalls = 8;
+static const int kNetMaxPowerUps = 32;
+static const int kNetMaxBricks = 128;
+
+#pragma pack(push, 1)
+struct PacketHostStart {
+    uint8_t type;
+    uint8_t difficulty;
+    uint32_t seed;
+};
+
+struct PacketClientInput {
+    uint8_t type;
+    float centerX;
+    uint8_t launchPressed;
+};
+
+struct NetBallState {
+    float x;
+    float y;
+    float vx;
+    float vy;
+    uint8_t launched;
+};
+
+struct NetPowerUpState {
+    float x;
+    float y;
+    uint8_t type;
+};
+
+struct PacketSnapshot {
+    uint8_t type;
+    uint8_t gameState;
+    int32_t score;
+    int32_t lives;
+    uint8_t widePaddleActive;
+    uint8_t frenzyActive;
+    float hostPaddleCenterX;
+    float clientPaddleCenterX;
+    float hostPaddleWidth;
+    float clientPaddleWidth;
+    uint8_t ballCount;
+    uint8_t powerUpCount;
+    uint8_t brickCount;
+    NetBallState balls[kNetMaxBalls];
+    NetPowerUpState powerUps[kNetMaxPowerUps];
+    uint8_t brickActive[kNetMaxBricks];
+};
+#pragma pack(pop)
+
 class GameApp {
 public:
 int Run() {
@@ -83,15 +165,33 @@ int Run() {
     const int screenHeight = 600;
     InitWindow(screenWidth, screenHeight, "Brick Breaker Game");
     SetExitKey(KEY_NULL);
+    SetTargetFPS(60);
+
+    bool enetReady = (enet_initialize() == 0);
 
     Difficulty selectedDifficulty = Difficulty::Normal;
     DifficultyConfig config = GetDifficultyConfig(selectedDifficulty);
+    NetMode netMode = NetMode::Offline;
+
+    struct NetContext {
+        ENetHost* host = nullptr;
+        ENetPeer* peer = nullptr;
+        bool connected = false;
+        float remoteCenterX = 600.0f;
+        bool remoteLaunchPressed = false;
+        uint32_t sessionSeed = 0;
+        bool autoReconnect = true;
+        float nextReconnectTime = 0.0f;
+        char statusText[160] = "Network: idle";
+    } net;
 
     std::vector<GameObject*> objects;
     std::vector<Brick*> bricks;
     std::vector<Ball*> balls;
     std::vector<PowerUp*> powerUps;
-    Paddle* paddle = nullptr;
+    Paddle* hostPaddle = nullptr;
+    Paddle* clientPaddle = nullptr;
+    Paddle* localPaddle = nullptr;
 
     float brickWidth = 60.0f;
     float brickHeight = 18.0f;
@@ -102,7 +202,6 @@ int Run() {
 
     int score = 0;
     int lives = config.lives;
-    int combo = 0;
     int scoreMultiplier = 1;
     bool widePaddleActive = false;
     bool frenzyActive = false;
@@ -110,26 +209,8 @@ int Run() {
     float frenzyEndTime = 0.0f;
     float basePaddleWidth = config.paddleWidth;
 
-    struct TrailParticle {
-        Vector2 pos;
-        Vector2 vel;
-        float life;
-        float maxLife;
-        float size;
-        Color color;
-    };
-
-    struct Shockwave {
-        Vector2 pos;
-        float radius;
-        float maxRadius;
-        float life;
-        float maxLife;
-        Color color;
-    };
-
-    std::vector<TrailParticle> trailParticles;
-    std::vector<Shockwave> shockwaves;
+    enum class State { Start, Playing, Settings, Victory, GameOver };
+    State state = State::Start;
 
     auto ClearObjects = [&]() {
         for (GameObject* object : objects) {
@@ -139,9 +220,9 @@ int Run() {
         bricks.clear();
         balls.clear();
         powerUps.clear();
-        trailParticles.clear();
-        shockwaves.clear();
-        paddle = nullptr;
+        hostPaddle = nullptr;
+        clientPaddle = nullptr;
+        localPaddle = nullptr;
     };
 
     auto RemoveObject = [&](GameObject* target) {
@@ -163,96 +244,6 @@ int Run() {
         }
         balls.push_back(newBall);
         objects.push_back(newBall);
-    };
-
-    auto SpawnTrailParticle = [&](Vector2 pos, Color c, float speedMul = 1.0f) {
-        float vx = ((float)(rand() % 1000) / 1000.0f - 0.5f) * 60.0f * speedMul;
-        float vy = ((float)(rand() % 1000) / 1000.0f - 0.5f) * 60.0f * speedMul;
-        float life = 0.2f + ((float)(rand() % 1000) / 1000.0f) * 0.35f;
-        float size = 2.0f + ((float)(rand() % 1000) / 1000.0f) * 3.2f;
-        trailParticles.push_back({ pos, { vx, vy }, life, life, size, c });
-    };
-
-    auto SpawnPickupBurst = [&](Vector2 pos, PowerUpType type) {
-        Color innerColor = { 40, 240, 255, 255 };
-        Color outerColor = { 60, 140, 255, 255 };
-        float innerMaxRadius = 70.0f;
-        float outerMaxRadius = 110.0f;
-        float innerLife = 0.42f;
-        float outerLife = 0.56f;
-        int particleCount = 20;
-
-        if (type == PowerUpType::WidePaddle) {
-            innerColor = { 120, 255, 160, 255 };
-            outerColor = { 70, 210, 255, 255 };
-            innerMaxRadius = 82.0f;
-            outerMaxRadius = 124.0f;
-            innerLife = 0.48f;
-            outerLife = 0.62f;
-            particleCount = 24;
-        }
-        else if (type == PowerUpType::Frenzy) {
-            innerColor = { 255, 95, 210, 255 };
-            outerColor = { 255, 175, 80, 255 };
-            innerMaxRadius = 92.0f;
-            outerMaxRadius = 140.0f;
-            innerLife = 0.54f;
-            outerLife = 0.72f;
-            particleCount = 30;
-        }
-
-        for (int i = 0; i < particleCount; ++i) {
-            float angle = ((float)i / (float)particleCount) * 2.0f * PI;
-            float speed = 110.0f + (float)(rand() % 100);
-            float life = 0.35f + ((float)(rand() % 1000) / 1000.0f) * 0.4f;
-            float size = 2.0f + ((float)(rand() % 1000) / 1000.0f) * 4.0f;
-            Vector2 vel = { cosf(angle) * speed, sinf(angle) * speed };
-            Color c = (i % 2 == 0) ? innerColor : outerColor;
-            trailParticles.push_back({ pos, vel, life, life, size, c });
-        }
-
-        shockwaves.push_back({ pos, 10.0f, innerMaxRadius, innerLife, innerLife, innerColor });
-        shockwaves.push_back({ pos, 16.0f, outerMaxRadius, outerLife, outerLife, outerColor });
-    };
-
-    auto UpdateVfx = [&](float dt) {
-        for (size_t i = 0; i < trailParticles.size();) {
-            TrailParticle& p = trailParticles[i];
-            p.life -= dt;
-            if (p.life <= 0.0f) {
-                trailParticles.erase(trailParticles.begin() + (int)i);
-                continue;
-            }
-            p.pos.x += p.vel.x * dt;
-            p.pos.y += p.vel.y * dt;
-            p.vel.x *= 0.97f;
-            p.vel.y *= 0.97f;
-            ++i;
-        }
-
-        for (size_t i = 0; i < shockwaves.size();) {
-            Shockwave& s = shockwaves[i];
-            s.life -= dt;
-            if (s.life <= 0.0f) {
-                shockwaves.erase(shockwaves.begin() + (int)i);
-                continue;
-            }
-            float progress = 1.0f - s.life / s.maxLife;
-            s.radius = 10.0f + (s.maxRadius - 10.0f) * progress;
-            ++i;
-        }
-    };
-
-    auto DrawVfx = [&]() {
-        for (const TrailParticle& p : trailParticles) {
-            float alpha = p.life / p.maxLife;
-            DrawCircleV(p.pos, p.size, Fade(p.color, alpha * 0.9f));
-        }
-
-        for (const Shockwave& s : shockwaves) {
-            float alpha = s.life / s.maxLife;
-            DrawRing(s.pos, s.radius - 2.0f, s.radius + 2.0f, 0, 360, 56, Fade(s.color, alpha * 0.7f));
-        }
     };
 
     auto CreateBricks = [&]() {
@@ -283,12 +274,39 @@ int Run() {
         rowsCount = config.rows;
         basePaddleWidth = config.paddleWidth;
         SpawnBall({ (float)screenWidth / 2, (float)screenHeight / 2 }, config.ballSpeed, 10, false);
-        paddle = new Paddle(350, 550, basePaddleWidth, 20);
-        objects.push_back(paddle);
+
+        if (netMode == NetMode::Offline) {
+            hostPaddle = new Paddle(350, 550, basePaddleWidth, 20, BLUE);
+            hostPaddle->SetBounds(5.0f, (float)screenWidth - 5.0f);
+            hostPaddle->SetControlEnabled(true);
+            objects.push_back(hostPaddle);
+            localPaddle = hostPaddle;
+        }
+        else {
+            float paddleWidthNet = basePaddleWidth * 0.9f;
+            hostPaddle = new Paddle(120, 550, paddleWidthNet, 20, { 70, 210, 255, 255 });
+            clientPaddle = new Paddle(560, 550, paddleWidthNet, 20, { 255, 100, 190, 255 });
+
+            hostPaddle->SetBounds(5.0f, screenWidth * 0.5f - 8.0f);
+            clientPaddle->SetBounds(screenWidth * 0.5f + 8.0f, (float)screenWidth - 5.0f);
+
+            hostPaddle->SetControlEnabled(netMode == NetMode::Host);
+            clientPaddle->SetControlEnabled(netMode == NetMode::Client);
+
+            if (netMode == NetMode::Host) {
+                localPaddle = hostPaddle;
+            }
+            else {
+                localPaddle = clientPaddle;
+            }
+
+            objects.push_back(hostPaddle);
+            objects.push_back(clientPaddle);
+        }
+
         CreateBricks();
         score = 0;
         lives = config.lives;
-        combo = 0;
         scoreMultiplier = 1;
         widePaddleActive = false;
         frenzyActive = false;
@@ -297,7 +315,7 @@ int Run() {
     };
 
     auto ResetBall = [&]() {
-        if (paddle == nullptr) {
+        if (hostPaddle == nullptr) {
             return;
         }
 
@@ -307,18 +325,355 @@ int Run() {
         }
         balls.clear();
 
-        Rectangle paddleRect = paddle->GetRect();
-        SpawnBall({ paddleRect.x + paddleRect.width / 2, paddleRect.y - 20 }, config.ballSpeed, 10, false);
+        if (netMode == NetMode::Offline) {
+            Rectangle paddleRect = hostPaddle->GetRect();
+            SpawnBall({ paddleRect.x + paddleRect.width / 2, paddleRect.y - 20 }, config.ballSpeed, 10, false);
+        }
+        else {
+            SpawnBall({ (float)screenWidth / 2, 530.0f }, config.ballSpeed, 10, false);
+        }
+    };
+
+    auto ShutdownNetwork = [&]() {
+        if (net.peer != nullptr) {
+            enet_peer_disconnect_now(net.peer, 0);
+            net.peer = nullptr;
+        }
+        if (net.host != nullptr) {
+            enet_host_destroy(net.host);
+            net.host = nullptr;
+        }
+        net.connected = false;
+        net.remoteLaunchPressed = false;
+    };
+
+    auto ParsePort = [&](const char* text) {
+        int port = atoi(text);
+        if (port < 1 || port > 65535) {
+            return 7777;
+        }
+        return port;
+    };
+
+    auto StartAsHost = [&](int hostPort) {
+        ShutdownNetwork();
+        if (!enetReady) {
+            snprintf(net.statusText, sizeof(net.statusText), "Network unavailable: ENet init failed");
+            return false;
+        }
+        ENetAddress address;
+        address.host = ENET_HOST_ANY;
+        address.port = (enet_uint16)hostPort;
+        net.host = enet_host_create(&address, 1, 2, 0, 0);
+        net.connected = false;
+        if (net.host == nullptr) {
+            snprintf(net.statusText, sizeof(net.statusText), "Host listen failed on port %d", hostPort);
+            return false;
+        }
+        snprintf(net.statusText, sizeof(net.statusText), "Host listening on port %d", hostPort);
+        return net.host != nullptr;
+    };
+
+    auto StartAsClient = [&](const char* hostIp, int hostPort) {
+        ShutdownNetwork();
+        if (!enetReady) {
+            snprintf(net.statusText, sizeof(net.statusText), "Network unavailable: ENet init failed");
+            return false;
+        }
+        net.host = enet_host_create(nullptr, 1, 2, 0, 0);
+        if (net.host == nullptr) {
+            snprintf(net.statusText, sizeof(net.statusText), "Client init failed");
+            return false;
+        }
+
+        ENetAddress address;
+        if (enet_address_set_host(&address, hostIp) != 0) {
+            ShutdownNetwork();
+            snprintf(net.statusText, sizeof(net.statusText), "Invalid server ip: %s", hostIp);
+            return false;
+        }
+        address.port = (enet_uint16)hostPort;
+        net.peer = enet_host_connect(net.host, &address, 2, 0);
+        if (net.peer == nullptr) {
+            ShutdownNetwork();
+            snprintf(net.statusText, sizeof(net.statusText), "Connect create failed: %s:%d", hostIp, hostPort);
+            return false;
+        }
+        net.connected = false;
+        snprintf(net.statusText, sizeof(net.statusText), "Connecting to %s:%d", hostIp, hostPort);
+        return true;
+    };
+
+    char hostPortText[16] = "7777";
+    char clientIpText[64] = "127.0.0.1";
+    char clientPortText[16] = "7777";
+    enum class InputField { None, HostPort, ClientIp, ClientPort };
+    InputField activeInput = InputField::None;
+
+    auto PushTextChar = [&](char* dst, int cap, int* len, int codepoint, bool onlyDigits, bool allowDot) {
+        if (codepoint < 32 || codepoint > 126) {
+            return;
+        }
+        char c = (char)codepoint;
+        if (onlyDigits && (c < '0' || c > '9')) {
+            return;
+        }
+        if (!onlyDigits && allowDot) {
+            bool ok = (c >= '0' && c <= '9') || c == '.';
+            if (!ok) {
+                return;
+            }
+        }
+        if (*len < cap - 1) {
+            dst[*len] = c;
+            (*len)++;
+            dst[*len] = '\0';
+        }
+    };
+
+    auto ReconnectOnline = [&]() {
+        if (netMode == NetMode::Host) {
+            return StartAsHost(ParsePort(hostPortText));
+        }
+        if (netMode == NetMode::Client) {
+            return StartAsClient(clientIpText, ParsePort(clientPortText));
+        }
+        return true;
+    };
+
+    auto SendHostStart = [&]() {
+        if (net.peer == nullptr || !net.connected) {
+            return;
+        }
+        PacketHostStart packetData;
+        packetData.type = (uint8_t)PacketType::HostStart;
+        packetData.difficulty = (uint8_t)selectedDifficulty;
+        packetData.seed = net.sessionSeed;
+        ENetPacket* packet = enet_packet_create(&packetData, sizeof(packetData), ENET_PACKET_FLAG_RELIABLE);
+        enet_peer_send(net.peer, 0, packet);
+        enet_host_flush(net.host);
+    };
+
+    auto SendClientInput = [&](float centerX, bool launchPressed) {
+        if (net.peer == nullptr || !net.connected) {
+            return;
+        }
+        PacketClientInput inputData;
+        inputData.type = (uint8_t)PacketType::ClientInput;
+        inputData.centerX = centerX;
+        inputData.launchPressed = launchPressed ? 1 : 0;
+        ENetPacket* packet = enet_packet_create(&inputData, sizeof(inputData), 0);
+        enet_peer_send(net.peer, 0, packet);
+    };
+
+    auto SendSnapshot = [&]() {
+        if (netMode != NetMode::Host || net.peer == nullptr || !net.connected) {
+            return;
+        }
+
+        PacketSnapshot ss;
+        memset(&ss, 0, sizeof(ss));
+        ss.type = (uint8_t)PacketType::Snapshot;
+        ss.gameState = (state == State::Victory) ? 1 : ((state == State::GameOver) ? 2 : 0);
+        ss.score = score;
+        ss.lives = lives;
+        ss.widePaddleActive = widePaddleActive ? 1 : 0;
+        ss.frenzyActive = frenzyActive ? 1 : 0;
+        ss.hostPaddleCenterX = hostPaddle ? hostPaddle->GetCenterX() : 200.0f;
+        ss.clientPaddleCenterX = clientPaddle ? clientPaddle->GetCenterX() : 600.0f;
+        ss.hostPaddleWidth = hostPaddle ? hostPaddle->GetWidth() : basePaddleWidth;
+        ss.clientPaddleWidth = clientPaddle ? clientPaddle->GetWidth() : basePaddleWidth;
+
+        int bCount = (int)std::min((size_t)kNetMaxBalls, balls.size());
+        ss.ballCount = (uint8_t)bCount;
+        for (int i = 0; i < bCount; ++i) {
+            Vector2 p = balls[i]->GetPosition();
+            Vector2 v = balls[i]->GetVelocity();
+            ss.balls[i].x = p.x;
+            ss.balls[i].y = p.y;
+            ss.balls[i].vx = v.x;
+            ss.balls[i].vy = v.y;
+            ss.balls[i].launched = balls[i]->IsLaunched() ? 1 : 0;
+        }
+
+        int pCount = (int)std::min((size_t)kNetMaxPowerUps, powerUps.size());
+        ss.powerUpCount = (uint8_t)pCount;
+        for (int i = 0; i < pCount; ++i) {
+            Vector2 p = powerUps[i]->GetPosition();
+            ss.powerUps[i].x = p.x;
+            ss.powerUps[i].y = p.y;
+            ss.powerUps[i].type = (uint8_t)powerUps[i]->GetType();
+        }
+
+        int brickCount = (int)std::min((size_t)kNetMaxBricks, bricks.size());
+        ss.brickCount = (uint8_t)brickCount;
+        for (int i = 0; i < brickCount; ++i) {
+            ss.brickActive[i] = bricks[i]->IsActive() ? 1 : 0;
+        }
+
+        ENetPacket* packet = enet_packet_create(&ss, sizeof(ss), 0);
+        enet_peer_send(net.peer, 0, packet);
+    };
+
+    auto ApplySnapshot = [&](const PacketSnapshot& ss) {
+        score = ss.score;
+        lives = ss.lives;
+        widePaddleActive = ss.widePaddleActive != 0;
+        frenzyActive = ss.frenzyActive != 0;
+
+        if (hostPaddle != nullptr) {
+            hostPaddle->SetWidth(ss.hostPaddleWidth);
+            hostPaddle->SetCenterX(ss.hostPaddleCenterX);
+        }
+        if (clientPaddle != nullptr) {
+            clientPaddle->SetWidth(ss.clientPaddleWidth);
+            clientPaddle->SetCenterX(ss.clientPaddleCenterX);
+        }
+
+        int targetBallCount = (int)ss.ballCount;
+        while ((int)balls.size() > targetBallCount) {
+            Ball* b = balls.back();
+            RemoveObject(b);
+            delete b;
+            balls.pop_back();
+        }
+        while ((int)balls.size() < targetBallCount) {
+            SpawnBall({ 400, 300 }, config.ballSpeed, 10, false);
+        }
+
+        for (int i = 0; i < targetBallCount; ++i) {
+            balls[i]->SetPosition({ ss.balls[i].x, ss.balls[i].y });
+            balls[i]->SetVelocity({ ss.balls[i].vx, ss.balls[i].vy });
+            if (ss.balls[i].launched) {
+                balls[i]->Launch();
+            }
+            else {
+                balls[i]->ResetLaunchState();
+            }
+            if (frenzyActive) {
+                balls[i]->SetSpeedFactor(2.0f);
+            }
+            else {
+                balls[i]->SetSpeedFactor(1.0f);
+                balls[i]->SetColor(RED);
+            }
+        }
+
+        int targetPowerCount = (int)ss.powerUpCount;
+        while ((int)powerUps.size() > targetPowerCount) {
+            PowerUp* p = powerUps.back();
+            RemoveObject(p);
+            delete p;
+            powerUps.pop_back();
+        }
+        while ((int)powerUps.size() < targetPowerCount) {
+            PowerUp* p = new PowerUp({ 0, 0 }, PowerUpType::SplitBalls);
+            powerUps.push_back(p);
+            objects.push_back(p);
+        }
+
+        for (int i = 0; i < targetPowerCount; ++i) {
+            PowerUpType type = (PowerUpType)ss.powerUps[i].type;
+            if (powerUps[i]->GetType() != type) {
+                RemoveObject(powerUps[i]);
+                delete powerUps[i];
+                PowerUp* p = new PowerUp({ ss.powerUps[i].x, ss.powerUps[i].y }, type);
+                powerUps[i] = p;
+                objects.push_back(p);
+            }
+            else {
+                powerUps[i]->SetPosition({ ss.powerUps[i].x, ss.powerUps[i].y });
+            }
+        }
+
+        int bc = std::min((int)ss.brickCount, (int)bricks.size());
+        for (int i = 0; i < bc; ++i) {
+            bricks[i]->SetActive(ss.brickActive[i] != 0);
+        }
+
+        if (ss.gameState == 1) {
+            state = State::Victory;
+        }
+        else if (ss.gameState == 2) {
+            state = State::GameOver;
+        }
+        else {
+            state = State::Playing;
+        }
+    };
+
+    auto ProcessNetworkEvents = [&]() {
+        if (net.host == nullptr) {
+            return;
+        }
+
+        ENetEvent ev;
+        while (enet_host_service(net.host, &ev, 0) > 0) {
+            if (ev.type == ENET_EVENT_TYPE_CONNECT) {
+                net.peer = ev.peer;
+                net.connected = true;
+                net.autoReconnect = false;
+                snprintf(net.statusText, sizeof(net.statusText), "Network: connected");
+            }
+            else if (ev.type == ENET_EVENT_TYPE_DISCONNECT) {
+                net.connected = false;
+                net.peer = nullptr;
+                net.remoteLaunchPressed = false;
+                if (netMode == NetMode::Client) {
+                    net.autoReconnect = true;
+                    net.nextReconnectTime = (float)GetTime() + 1.0f;
+                    snprintf(net.statusText, sizeof(net.statusText), "Disconnected, retrying...");
+                }
+                else if (netMode == NetMode::Host) {
+                    snprintf(net.statusText, sizeof(net.statusText), "Client disconnected");
+                }
+                state = State::Start;
+            }
+            else if (ev.type == ENET_EVENT_TYPE_RECEIVE) {
+                if (ev.packet->dataLength >= 1) {
+                    uint8_t type = ev.packet->data[0];
+
+                    if (netMode == NetMode::Host && type == (uint8_t)PacketType::ClientInput && ev.packet->dataLength == sizeof(PacketClientInput)) {
+                        PacketClientInput inData;
+                        memcpy(&inData, ev.packet->data, sizeof(inData));
+                        net.remoteCenterX = inData.centerX;
+                        if (inData.launchPressed != 0) {
+                            net.remoteLaunchPressed = true;
+                        }
+                    }
+                    else if (netMode == NetMode::Client && type == (uint8_t)PacketType::HostStart && ev.packet->dataLength == sizeof(PacketHostStart)) {
+                        PacketHostStart startPacket;
+                        memcpy(&startPacket, ev.packet->data, sizeof(startPacket));
+                        selectedDifficulty = (Difficulty)startPacket.difficulty;
+                        net.sessionSeed = startPacket.seed;
+                        srand(net.sessionSeed);
+                        CreateGameObjects();
+                        state = State::Playing;
+                    }
+                    else if (netMode == NetMode::Client && type == (uint8_t)PacketType::Snapshot && ev.packet->dataLength == sizeof(PacketSnapshot)) {
+                        PacketSnapshot ss;
+                        memcpy(&ss, ev.packet->data, sizeof(ss));
+                        ApplySnapshot(ss);
+                    }
+                }
+                enet_packet_destroy(ev.packet);
+            }
+        }
     };
 
     CreateGameObjects();
 
-    SetTargetFPS(60);
-
-    enum class State { Start, Playing, Settings, Victory, GameOver };
-    State state = State::Start;
+    ClearObjects();
 
     Rectangle startButton = { (float)(screenWidth / 2 - 100), (float)(screenHeight / 2 - 30), 200.0f, 60.0f };
+    Rectangle offlineButton = { (float)(screenWidth / 2 - 220), (float)(screenHeight / 2 - 95), 140.0f, 44.0f };
+    Rectangle hostButton = { (float)(screenWidth / 2 - 70), (float)(screenHeight / 2 - 95), 140.0f, 44.0f };
+    Rectangle clientButton = { (float)(screenWidth / 2 + 80), (float)(screenHeight / 2 - 95), 140.0f, 44.0f };
+    Rectangle reconnectButton = { (float)(screenWidth / 2 - 110), (float)(screenHeight / 2 + 156), 220.0f, 38.0f };
+    Rectangle hostPortInput = { 220, 184, 130, 34 };
+    Rectangle clientIpInput = { 220, 184, 260, 34 };
+    Rectangle clientPortInput = { 500, 184, 90, 34 };
+
     Rectangle easyButton = { (float)(screenWidth / 2 - 220), (float)(screenHeight / 2 + 50), 120.0f, 50.0f };
     Rectangle normalButton = { (float)(screenWidth / 2 - 60), (float)(screenHeight / 2 + 50), 120.0f, 50.0f };
     Rectangle hardButton = { (float)(screenWidth / 2 + 100), (float)(screenHeight / 2 + 50), 120.0f, 50.0f };
@@ -382,7 +737,13 @@ int Run() {
     while (!WindowShouldClose()) {
         Vector2 mp = GetMousePosition();
         float uiTime = (float)GetTime();
-        float dt = GetFrameTime();
+
+        ProcessNetworkEvents();
+
+        if (netMode == NetMode::Client && state == State::Start && !net.connected && net.autoReconnect && (float)GetTime() >= net.nextReconnectTime) {
+            ReconnectOnline();
+            net.nextReconnectTime = (float)GetTime() + 2.0f;
+        }
 
         if (state == State::Start) {
             BeginDrawing();
@@ -397,8 +758,43 @@ int Run() {
             DrawText(title, screenWidth / 2 - titleWidth / 2 + 2, 112, titleSize, Fade(neonPink, 0.45f));
             DrawText(title, screenWidth / 2 - titleWidth / 2, 110, titleSize, RAYWHITE);
 
+            bool hoverModeOffline = CheckCollisionPointRec(mp, offlineButton);
+            bool hoverModeHost = CheckCollisionPointRec(mp, hostButton);
+            bool hoverModeClient = CheckCollisionPointRec(mp, clientButton);
+            DrawNeonButton(offlineButton, "OFFLINE", hoverModeOffline, netMode == NetMode::Offline, neonBlue);
+            DrawNeonButton(hostButton, "HOST", hoverModeHost, netMode == NetMode::Host, { 80, 255, 170, 255 });
+            DrawNeonButton(clientButton, "CLIENT", hoverModeClient, netMode == NetMode::Client, neonPink);
+
+            if (netMode == NetMode::Host) {
+                DrawText("Port", (int)hostPortInput.x, (int)hostPortInput.y - 20, 18, Fade(neonCyan, 0.9f));
+                DrawRectangleRounded(hostPortInput, 0.2f, 6, Fade(panelDark, 0.95f));
+                DrawRectangleRoundedLines(hostPortInput, 0.2f, 6, activeInput == InputField::HostPort ? neonCyan : Fade(neonBlue, 0.75f));
+                DrawText(hostPortText, (int)hostPortInput.x + 10, (int)hostPortInput.y + 8, 20, RAYWHITE);
+            }
+            else if (netMode == NetMode::Client) {
+                DrawText("Server IP", (int)clientIpInput.x, (int)clientIpInput.y - 20, 18, Fade(neonCyan, 0.9f));
+                DrawText("Port", (int)clientPortInput.x, (int)clientPortInput.y - 20, 18, Fade(neonCyan, 0.9f));
+
+                DrawRectangleRounded(clientIpInput, 0.2f, 6, Fade(panelDark, 0.95f));
+                DrawRectangleRoundedLines(clientIpInput, 0.2f, 6, activeInput == InputField::ClientIp ? neonCyan : Fade(neonBlue, 0.75f));
+                DrawText(clientIpText, (int)clientIpInput.x + 10, (int)clientIpInput.y + 8, 20, RAYWHITE);
+
+                DrawRectangleRounded(clientPortInput, 0.2f, 6, Fade(panelDark, 0.95f));
+                DrawRectangleRoundedLines(clientPortInput, 0.2f, 6, activeInput == InputField::ClientPort ? neonCyan : Fade(neonBlue, 0.75f));
+                DrawText(clientPortText, (int)clientPortInput.x + 10, (int)clientPortInput.y + 8, 20, RAYWHITE);
+            }
+
             bool hover = CheckCollisionPointRec(mp, startButton);
-            DrawNeonButton(startButton, "START", hover, false, neonCyan);
+            const char* startLabel = "START";
+            if (netMode == NetMode::Client) {
+                startLabel = "WAIT HOST";
+            }
+            DrawNeonButton(startButton, startLabel, hover, false, neonCyan);
+
+            if (netMode != NetMode::Offline && !net.connected) {
+                bool hoverReconnect = CheckCollisionPointRec(mp, reconnectButton);
+                DrawNeonButton(reconnectButton, "RECONNECT", hoverReconnect, false, neonPink);
+            }
 
             const char* difficultyTitle = "SELECT DIFFICULTY";
             int difficultyTitleSize = 22;
@@ -413,6 +809,10 @@ int Run() {
             DrawNeonButton(normalButton, "NORMAL", hoverNormal, selectedDifficulty == Difficulty::Normal, neonCyan);
             DrawNeonButton(hardButton, "HARD", hoverHard, selectedDifficulty == Difficulty::Hard, neonPink);
 
+            if (netMode == NetMode::Client) {
+                DrawText("Difficulty from host", screenWidth / 2 - 86, (int)hardButton.y + 104, 16, Fade(RAYWHITE, 0.8f));
+            }
+
             const char* currentLabel = GetDifficultyLabel(selectedDifficulty);
             char selectedText[64];
             snprintf(selectedText, sizeof(selectedText), "Current: %s", currentLabel);
@@ -420,20 +820,111 @@ int Run() {
             int selectedTextWidth = MeasureText(selectedText, selectedTextSize);
             DrawText(selectedText, screenWidth / 2 - selectedTextWidth / 2, (int)hardButton.y + 70, selectedTextSize, Fade(neonCyan, 0.95f));
 
+            if (netMode != NetMode::Offline) {
+                DrawText(net.statusText, 160, 160, 18, net.connected ? Fade(neonCyan, 0.9f) : Fade(neonPink, 0.9f));
+            }
+
             EndDrawing();
 
-            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hoverEasy) {
+            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hoverModeOffline) {
+                netMode = NetMode::Offline;
+                ShutdownNetwork();
+                activeInput = InputField::None;
+                snprintf(net.statusText, sizeof(net.statusText), "Offline mode");
+            }
+            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hoverModeHost) {
+                netMode = NetMode::Host;
+                ReconnectOnline();
+            }
+            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hoverModeClient) {
+                netMode = NetMode::Client;
+                net.autoReconnect = true;
+                net.nextReconnectTime = (float)GetTime() + 0.2f;
+                ReconnectOnline();
+            }
+
+            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                if (netMode == NetMode::Host && CheckCollisionPointRec(mp, hostPortInput)) {
+                    activeInput = InputField::HostPort;
+                }
+                else if (netMode == NetMode::Client && CheckCollisionPointRec(mp, clientIpInput)) {
+                    activeInput = InputField::ClientIp;
+                }
+                else if (netMode == NetMode::Client && CheckCollisionPointRec(mp, clientPortInput)) {
+                    activeInput = InputField::ClientPort;
+                }
+                else if (!(CheckCollisionPointRec(mp, offlineButton) || CheckCollisionPointRec(mp, hostButton) || CheckCollisionPointRec(mp, clientButton))) {
+                    activeInput = InputField::None;
+                }
+            }
+
+            int key = GetCharPressed();
+            while (key > 0) {
+                if (activeInput == InputField::HostPort) {
+                    int len = (int)strlen(hostPortText);
+                    PushTextChar(hostPortText, (int)sizeof(hostPortText), &len, key, true, false);
+                }
+                else if (activeInput == InputField::ClientIp) {
+                    int len = (int)strlen(clientIpText);
+                    PushTextChar(clientIpText, (int)sizeof(clientIpText), &len, key, false, true);
+                }
+                else if (activeInput == InputField::ClientPort) {
+                    int len = (int)strlen(clientPortText);
+                    PushTextChar(clientPortText, (int)sizeof(clientPortText), &len, key, true, false);
+                }
+                key = GetCharPressed();
+            }
+
+            if (IsKeyPressed(KEY_BACKSPACE)) {
+                if (activeInput == InputField::HostPort) {
+                    int len = (int)strlen(hostPortText);
+                    if (len > 0) {
+                        hostPortText[len - 1] = '\0';
+                    }
+                }
+                else if (activeInput == InputField::ClientIp) {
+                    int len = (int)strlen(clientIpText);
+                    if (len > 0) {
+                        clientIpText[len - 1] = '\0';
+                    }
+                }
+                else if (activeInput == InputField::ClientPort) {
+                    int len = (int)strlen(clientPortText);
+                    if (len > 0) {
+                        clientPortText[len - 1] = '\0';
+                    }
+                }
+            }
+
+            bool hoverReconnect = CheckCollisionPointRec(mp, reconnectButton);
+            if (netMode != NetMode::Offline && !net.connected && IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hoverReconnect) {
+                net.autoReconnect = (netMode == NetMode::Client);
+                net.nextReconnectTime = (float)GetTime() + 2.0f;
+                ReconnectOnline();
+            }
+
+            bool canEditDifficulty = (netMode != NetMode::Client);
+            if (canEditDifficulty && IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hoverEasy) {
                 selectedDifficulty = Difficulty::Easy;
             }
-            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hoverNormal) {
+            if (canEditDifficulty && IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hoverNormal) {
                 selectedDifficulty = Difficulty::Normal;
             }
-            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hoverHard) {
+            if (canEditDifficulty && IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hoverHard) {
                 selectedDifficulty = Difficulty::Hard;
             }
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hover) {
-                CreateGameObjects();
-                state = State::Playing;
+                if (netMode == NetMode::Offline) {
+                    CreateGameObjects();
+                    state = State::Playing;
+                }
+                else if (netMode == NetMode::Host && net.connected) {
+                    net.sessionSeed = (uint32_t)rand();
+                    srand(net.sessionSeed);
+                    CreateGameObjects();
+                    SendHostStart();
+                    state = State::Playing;
+                }
             }
 
             continue;
@@ -464,8 +955,18 @@ int Run() {
                 state = State::Start;
             }
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hoverRestart) {
-                CreateGameObjects();
-                state = State::Playing;
+                if (netMode == NetMode::Client) {
+                    state = State::Start;
+                }
+                else {
+                    net.sessionSeed = (uint32_t)rand();
+                    srand(net.sessionSeed);
+                    CreateGameObjects();
+                    if (netMode == NetMode::Host) {
+                        SendHostStart();
+                    }
+                    state = State::Playing;
+                }
             }
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hoverQuit) {
                 break;
@@ -499,8 +1000,18 @@ int Run() {
             EndDrawing();
 
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hover) {
-                CreateGameObjects();
-                state = State::Playing;
+                if (netMode == NetMode::Client) {
+                    state = State::Start;
+                }
+                else {
+                    net.sessionSeed = (uint32_t)rand();
+                    srand(net.sessionSeed);
+                    CreateGameObjects();
+                    if (netMode == NetMode::Host) {
+                        SendHostStart();
+                    }
+                    state = State::Playing;
+                }
             }
 
             continue;
@@ -531,8 +1042,18 @@ int Run() {
             EndDrawing();
 
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hover) {
-                CreateGameObjects();
-                state = State::Playing;
+                if (netMode == NetMode::Client) {
+                    state = State::Start;
+                }
+                else {
+                    net.sessionSeed = (uint32_t)rand();
+                    srand(net.sessionSeed);
+                    CreateGameObjects();
+                    if (netMode == NetMode::Host) {
+                        SendHostStart();
+                    }
+                    state = State::Playing;
+                }
             }
 
             continue;
@@ -543,34 +1064,56 @@ int Run() {
             continue;
         }
 
-        if (IsKeyPressed(KEY_SPACE)) {
-            for (Ball* ball : balls) {
-                if (!ball->IsLaunched()) {
-                    ball->Launch();
+        bool authoritativeSim = (netMode != NetMode::Client);
+        bool launchPressedLocal = IsKeyPressed(KEY_SPACE);
+
+        if (authoritativeSim) {
+            if (clientPaddle != nullptr && netMode == NetMode::Host) {
+                clientPaddle->SetCenterX(net.remoteCenterX);
+            }
+
+            for (GameObject* object : objects) {
+                object->Update();
+            }
+
+            bool launchPressed = launchPressedLocal || (netMode == NetMode::Host && net.remoteLaunchPressed);
+            net.remoteLaunchPressed = false;
+            if (launchPressed) {
+                for (Ball* ball : balls) {
+                    if (!ball->IsLaunched()) {
+                        ball->Launch();
+                    }
+                }
+            }
+
+            if (!balls.empty()) {
+                Ball* anchorBall = balls[0];
+                if (!anchorBall->IsLaunched()) {
+                    if (netMode == NetMode::Offline && hostPaddle != nullptr) {
+                        Rectangle paddleRect = hostPaddle->GetRect();
+                        anchorBall->SetPosition({ paddleRect.x + paddleRect.width / 2, paddleRect.y - anchorBall->GetRadius() - 1.0f });
+                    }
+                    else {
+                        anchorBall->SetPosition({ (float)screenWidth / 2, 530.0f });
+                    }
                 }
             }
         }
-
-        for (GameObject* object : objects) {
-            object->Update();
-        }
-
-        if (paddle != nullptr) {
-            Rectangle paddleRect = paddle->GetRect();
-            for (Ball* ball : balls) {
-                if (!ball->IsLaunched()) {
-                    ball->SetPosition({ paddleRect.x + paddleRect.width / 2, paddleRect.y - ball->GetRadius() - 1.0f });
-                }
+        else {
+            if (localPaddle != nullptr) {
+                localPaddle->Update();
+                SendClientInput(localPaddle->GetCenterX(), launchPressedLocal);
             }
         }
-
-        UpdateVfx(dt);
 
         float now = (float)GetTime();
         if (widePaddleActive && now >= widePaddleEndTime) {
             widePaddleActive = false;
-            if (paddle != nullptr) {
-                paddle->SetWidth(basePaddleWidth);
+            if (hostPaddle != nullptr) {
+                hostPaddle->SetWidth(basePaddleWidth);
+            }
+            if (clientPaddle != nullptr) {
+                clientPaddle->SetWidth(basePaddleWidth * 0.9f);
             }
         }
         if (frenzyActive && now >= frenzyEndTime) {
@@ -590,14 +1133,18 @@ int Run() {
             }
         }
 
-        if (paddle != nullptr) {
-            Rectangle paddleRect = paddle->GetRect();
+        if (authoritativeSim && hostPaddle != nullptr) {
+            Rectangle paddleHostRect = hostPaddle->GetRect();
+            Rectangle paddleClientRect = clientPaddle ? clientPaddle->GetRect() : Rectangle{ 0, 0, 0, 0 };
 
             for (Ball* ball : balls) {
                 if (!ball->IsLaunched()) {
                     continue;
                 }
-                ball->BounceRect(paddleRect);
+                bool bounced = ball->BounceRect(paddleHostRect);
+                if (!bounced && clientPaddle != nullptr) {
+                    ball->BounceRect(paddleClientRect);
+                }
             }
 
             for (Ball* ball : balls) {
@@ -612,9 +1159,8 @@ int Run() {
 
                     if (ball->BounceRect(brick->GetRect())) {
                         brick->SetActive(false);
-                        combo++;
                         int brickType = brick->IsGolden() ? 2 : 1;
-                        score += scoreCalculator.CalculateScore(brickType, combo) * scoreMultiplier;
+                        score += scoreCalculator.CalculateScore(brickType, 0) * scoreMultiplier;
 
                         if ((rand() % 5) == 0) {
                             PowerUpType type = PowerUpType::SplitBalls;
@@ -644,16 +1190,9 @@ int Run() {
                 PowerUp* pu = powerUps[i];
                 bool removePowerUp = false;
 
-                Color puColor = neonCyan;
-                if (pu->GetType() == PowerUpType::WidePaddle) {
-                    puColor = { 120, 255, 160, 255 };
-                }
-                else if (pu->GetType() == PowerUpType::Frenzy) {
-                    puColor = neonPink;
-                }
-                SpawnTrailParticle(pu->GetPosition(), puColor, 0.7f);
-
-                if (CheckCollisionRecs(pu->GetRect(), paddleRect)) {
+                bool pickedByHost = CheckCollisionRecs(pu->GetRect(), paddleHostRect);
+                bool pickedByClient = clientPaddle != nullptr && CheckCollisionRecs(pu->GetRect(), paddleClientRect);
+                if (pickedByHost || pickedByClient) {
                     PowerUpType type = pu->GetType();
                     if (type == PowerUpType::SplitBalls) {
                         if (!balls.empty()) {
@@ -671,7 +1210,12 @@ int Run() {
                     else if (type == PowerUpType::WidePaddle) {
                         widePaddleActive = true;
                         widePaddleEndTime = now + 10.0f;
-                        paddle->SetWidth(basePaddleWidth * 2.0f);
+                        if (hostPaddle != nullptr) {
+                            hostPaddle->SetWidth(basePaddleWidth * 1.6f);
+                        }
+                        if (clientPaddle != nullptr) {
+                            clientPaddle->SetWidth(basePaddleWidth * 1.45f);
+                        }
                     }
                     else if (type == PowerUpType::Frenzy) {
                         frenzyActive = true;
@@ -681,8 +1225,6 @@ int Run() {
                             ball->SetSpeedFactor(2.0f);
                         }
                     }
-
-                    SpawnPickupBurst(pu->GetPosition(), type);
 
                     removePowerUp = true;
                 }
@@ -714,7 +1256,6 @@ int Run() {
 
             if (balls.empty()) {
                 lives--;
-                combo = 0;
                 if (lives <= 0) {
                     state = State::GameOver;
                     continue;
@@ -734,6 +1275,10 @@ int Run() {
             state = State::Victory;
         }
 
+        if (netMode == NetMode::Host) {
+            SendSnapshot();
+        }
+
         BeginDrawing();
         DrawSciFiBackground(uiTime);
 
@@ -742,15 +1287,24 @@ int Run() {
         DrawRectangle(0, 0, screenWidth, (int)wallThickness, Fade(neonBlue, 0.9f));
         DrawRectangle(0, screenHeight - (int)wallThickness, screenWidth, (int)wallThickness, Fade(neonBlue, 0.9f));
 
-        DrawVfx();
-
         for (GameObject* object : objects) {
             object->Draw();
+        }
+
+        if (netMode != NetMode::Offline) {
+            DrawLine(screenWidth / 2, 120, screenWidth / 2, screenHeight - 10, Fade(neonBlue, 0.4f));
         }
 
         char scoreText[48];
         snprintf(scoreText, sizeof(scoreText), "SCORE  %d", score);
         DrawHudCard({ 560, 12, 220, 40 }, scoreText, neonCyan);
+
+        if (netMode == NetMode::Host) {
+            DrawHudCard({ 18, 104, 200, 40 }, "ONLINE HOST", { 80, 255, 170, 255 });
+        }
+        else if (netMode == NetMode::Client) {
+            DrawHudCard({ 18, 104, 210, 40 }, "ONLINE CLIENT", neonPink);
+        }
 
         if (widePaddleActive) {
             DrawHudCard({ 18, 12, 148, 40 }, "WIDE x2", { 120, 255, 160, 255 });
@@ -767,7 +1321,12 @@ int Run() {
             }
         }
         if (waitingForLaunch) {
-            DrawHudCard({ 290, 58, 220, 40 }, "PRESS SPACE TO LAUNCH", neonBlue);
+            if (netMode == NetMode::Client) {
+                DrawHudCard({ 260, 58, 280, 40 }, "PRESS SPACE TO REQUEST LAUNCH", neonBlue);
+            }
+            else {
+                DrawHudCard({ 290, 58, 220, 40 }, "PRESS SPACE TO LAUNCH", neonBlue);
+            }
         }
 
         DrawHudCard({ 560, 58, 220, 40 }, "LIVES", neonBlue);
@@ -780,8 +1339,13 @@ int Run() {
         EndDrawing();
     }
 
+    ShutdownNetwork();
+
     ClearObjects();
     CloseWindow();
+    if (enetReady) {
+        enet_deinitialize();
+    }
     return 0;
 }
 };
