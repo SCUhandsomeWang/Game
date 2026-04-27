@@ -5,6 +5,9 @@
 #include <cstring>
 #include <cstdint>
 
+constexpr int MAX_SYNC_BRICKS = 96;
+constexpr int MAX_SYNC_POWERUPS = 24;
+
 // 网络消息类型
 enum class MessageType : uint8_t {
     HELLO = 1,              // 握手消息
@@ -91,6 +94,15 @@ struct PaddleStateData {
     }
 };
 
+struct PowerUpStateData {
+    float posX;
+    float posY;
+    uint8_t type;
+    uint8_t active;
+
+    PowerUpStateData() : posX(0), posY(0), type(0), active(0) {}
+};
+
 // 游戏状态消息（主机发送）
 struct GameStateMessage : public NetworkMessage {
     BallStateData ball;
@@ -100,15 +112,30 @@ struct GameStateMessage : public NetworkMessage {
     int guestScore;
     int hostLives;
     int guestLives;
+    int brickCount;
+    uint8_t brickActive[MAX_SYNC_BRICKS];
+    int powerUpCount;
+    PowerUpStateData powerUps[MAX_SYNC_POWERUPS];
+    uint8_t widePaddleActive;
+    uint8_t frenzyActive;
     
     GameStateMessage() 
         : NetworkMessage(MessageType::GAME_STATE),
-          hostScore(0), guestScore(0), hostLives(3), guestLives(3) {}
+                    hostScore(0), guestScore(0), hostLives(3), guestLives(3),
+                    brickCount(0), powerUpCount(0), widePaddleActive(0), frenzyActive(0) {
+                memset(brickActive, 0, sizeof(brickActive));
+        for (int i = 0; i < MAX_SYNC_POWERUPS; ++i) {
+            powerUps[i] = PowerUpStateData();
+        }
+        }
     
     size_t GetSize() const override {
         return sizeof(MessageType) + sizeof(uint32_t) + 
                sizeof(BallStateData) + sizeof(PaddleStateData) * 2 +
-               sizeof(int) * 4;
+               sizeof(int) * 6 +
+               sizeof(brickActive) +
+               sizeof(powerUps) +
+               sizeof(uint8_t) * 2;
     }
 };
 
