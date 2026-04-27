@@ -195,10 +195,10 @@ int main() {
                 menuState = MenuState::MAIN_MENU;
             }
 
-            // 这里可以检测客户端连接并开始游戏
-            if (networkGame.IsConnected()) {
-                // 在实际实现中，这里应该过渡到游戏状态
+            // 主机模式下，收到客户端的板更新后再进入联机画面
+            if (networkGame.GetLastReceivedPaddleUpdate().timestamp != 0) {
                 printf("[Network] Client connected!\n");
+                menuState = MenuState::NETWORK_PLAYING;
             }
         }
         else if (menuState == MenuState::CLIENT_CONNECT) {
@@ -268,6 +268,31 @@ int main() {
             // 运行离线游戏
             GameApp offlineApp;
             return offlineApp.Run();
+        }
+        else if (menuState == MenuState::NETWORK_PLAYING) {
+            networkGame.Update(GetFrameTime());
+
+            Rectangle panel = { 90, 90, 620, 420 };
+            DrawPanel(panel);
+
+            const char* title = "NETWORK SESSION";
+            int titleSize = 36;
+            int titleWidth = MeasureText(title, titleSize);
+            DrawText(title, screenWidth / 2 - titleWidth / 2, 130, titleSize, RAYWHITE);
+
+            const char* modeText = (networkGame.GetMode() == NetworkManager::Mode::HOST) ? "Role: HOST" : "Role: CLIENT";
+            DrawText(modeText, 140, 210, 24, Fade(neonCyan, 0.95f));
+
+            const Vector2& remoteBallPos = networkGame.GetRemoteBallPosition();
+            const Vector2& remotePaddlePos = networkGame.GetRemotePaddlePosition();
+            DrawText(TextFormat("Remote Ball: (%.1f, %.1f)", remoteBallPos.x, remoteBallPos.y), 140, 250, 20, Fade(neonBlue, 0.95f));
+            DrawText(TextFormat("Remote Paddle: (%.1f, %.1f)", remotePaddlePos.x, remotePaddlePos.y), 140, 285, 20, Fade(neonBlue, 0.95f));
+
+            DrawCircle((int)remoteBallPos.x, (int)remoteBallPos.y, 8, RED);
+            DrawRectangle((int)remotePaddlePos.x, (int)remotePaddlePos.y, 100, 20, SKYBLUE);
+
+            DrawText("Connected. Press ESC to return to menu.", 140, 340, 18, Fade(neonCyan, 0.85f));
+            EndDrawing();
         }
 
         if (IsKeyPressed(KEY_ESCAPE)) {
