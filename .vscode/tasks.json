@@ -4,7 +4,7 @@
     {
       "label": "Build BrickGame (raylib)",
       "type": "shell",
-      "command": "Get-Process BrickGame -ErrorAction SilentlyContinue | Stop-Process -Force; New-Item -ItemType Directory -Path '${workspaceFolder}/BrickGame/build' -Force | Out-Null; g++ -std=c++17 -g -Wall -Wextra -IC:/raylib-5.5/raylib-5.5_win64_mingw-w64/include BrickGame/main.cpp BrickGame/Ball.cpp BrickGame/Paddle.cpp BrickGame/Brick.cpp -LC:/raylib-5.5/raylib-5.5_win64_mingw-w64/lib -lraylib -lopengl32 -lgdi32 -lwinmm -o BrickGame/build/BrickGame.exe",
+      "command": "Get-Process BrickGame -ErrorAction SilentlyContinue | Stop-Process -Force; New-Item -ItemType Directory -Path '${workspaceFolder}/BrickGame/build' -Force | Out-Null; g++ -std=c++17 -g -Wall -Wextra -IC:/raylib-5.5/raylib-5.5_win64_mingw-w64/include -I\"C:/Users/wanghan/安装的软件/enet-1.3.18/enet-1.3.18/include\" BrickGame/main.cpp BrickGame/Ball.cpp BrickGame/Paddle.cpp BrickGame/Brick.cpp -LC:/raylib-5.5/raylib-5.5_win64_mingw-w64/lib -L\"C:/Users/wanghan/安装的软件/enet-1.3.18/enet-1.3.18\" -l:enet64.lib -lraylib -lopengl32 -lgdi32 -lwinmm -lws2_32 -o BrickGame/build/BrickGame.exe",
       "options": {
         "cwd": "${workspaceFolder}"
       },
