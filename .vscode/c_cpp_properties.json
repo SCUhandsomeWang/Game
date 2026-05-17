@@ -9,7 +9,8 @@
       "cppStandard": "c++17",
       "includePath": [
         "${workspaceFolder}/BrickGame",
-        "C:/raylib-5.5/raylib-5.5_win64_mingw-w64/include"
+        "C:/raylib-5.5/raylib-5.5_win64_mingw-w64/include",
+        "C:/Users/wanghan/安装的软件/enet-1.3.18/enet-1.3.18/include"
       ],
       "defines": [
         "_DEBUG",
