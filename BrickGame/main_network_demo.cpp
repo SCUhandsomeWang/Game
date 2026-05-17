@@ -53,7 +53,8 @@ int main(int argc, char* argv[]) {
 
     InitWindow(800, 600, "Brick Breaker - Network Co-op");
     SetExitKey(KEY_NULL);
-    SetTargetFPS(60);
+    // 取消固定帧率限制（不调用 SetTargetFPS），让渲染不受限制
+    // SetTargetFPS(60);
 
     NetworkGameMode networkGame;
     bool connected = false;
@@ -465,6 +466,7 @@ int main(int argc, char* argv[]) {
         }
 
         DrawText("Press ESC to exit", 20, 580, 16, LIGHTGRAY);
+        DrawFPS(10, 10);
         EndDrawing();
 
         if (IsKeyPressed(KEY_R) && mode == NetworkManager::Mode::HOST) {

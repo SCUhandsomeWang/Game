@@ -2,6 +2,7 @@
 #include "NetworkGameMode.h"
 #include <string>
 #include <cstdio>
+#include <cstdlib>
 
 #ifdef DrawText
 #undef DrawText
@@ -10,12 +11,14 @@
 int main() {
     InitWindow(800, 600, "Brick Breaker - Network Mode");
     SetExitKey(KEY_NULL);
-    SetTargetFPS(60);
+    // 取消固定帧率限制（不调用 SetTargetFPS），让渲染不受限制
+    // SetTargetFPS(60);
 
     enum class MenuState {
         MAIN_MENU,
         OFFLINE_GAME,
         NETWORK_MODE_SELECT,
+        HOST_CONFIG,
         HOST_WAITING,
         CLIENT_CONNECT,
         NETWORK_PLAYING,
@@ -35,8 +38,19 @@ int main() {
     const Color panelEdge = { 55, 170, 255, 220 };
 
     std::string clientIP = "127.0.0.1";
-    int selectedPort = 5555;
     bool editingClientIP = false;
+    
+    // 主机配置
+    std::string hostIP = "0.0.0.0";
+    int hostPort = 5555;
+    bool editingHostIP = false;
+    bool editingHostPort = false;
+    std::string hostPortStr = "5555";
+    
+    // 客户端配置
+    int clientPort = 5555;
+    bool editingClientPort = false;
+    std::string clientPortStr = "5555";
 
     auto IsValidIPChar = [](int key) {
         return (key >= '0' && key <= '9') || key == '.';
@@ -118,6 +132,8 @@ int main() {
             DrawNeonButton(offlineButton, "PLAY OFFLINE", hoverOffline, false, { 100, 255, 100, 255 });
             DrawNeonButton(networkButton, "NETWORK MODE", hoverNetwork, false, neonCyan);
 
+            DrawFPS(10, 10);
+
             EndDrawing();
 
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
@@ -147,12 +163,14 @@ int main() {
             bool hoverBack = CheckCollisionPointRec(mp, backButton);
             DrawNeonButton(backButton, "BACK", hoverBack, false, { 150, 150, 150, 255 });
 
+            DrawFPS(10, 10);
+
             EndDrawing();
 
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
                 if (hoverHost) {
-                    menuState = MenuState::HOST_WAITING;
-                    networkGame.StartAsHost(selectedPort);
+                    menuState = MenuState::HOST_CONFIG;
+                    editingHostIP = true;
                 }
                 if (hoverClient) {
                     menuState = MenuState::CLIENT_CONNECT;
@@ -161,6 +179,134 @@ int main() {
                 if (hoverBack) {
                     menuState = MenuState::MAIN_MENU;
                 }
+            }
+        }
+        else if (menuState == MenuState::HOST_CONFIG) {
+            Rectangle menuPanel = { 60, 60, 680, 480 };
+            DrawPanel(menuPanel);
+
+            const char* title = "CONFIGURE HOST";
+            int titleSize = 36;
+            int titleWidth = MeasureText(title, titleSize);
+            DrawText(title, screenWidth / 2 - titleWidth / 2, 100, titleSize, neonPink);
+
+            // IP地址输入框
+            DrawText("Bind IP Address (0.0.0.0 = all interfaces):", 100, 180, 18, Fade(neonCyan, 0.9f));
+            Rectangle ipBox = { 100, 210, 600, 44 };
+            DrawRectangleRounded(ipBox, 0.2f, 6, Fade(panelDark, 0.95f));
+            DrawRectangleRoundedLines(ipBox, 0.2f, 6, editingHostIP ? neonCyan : Fade(neonBlue, 0.8f));
+            
+            std::string displayHostIP = hostIP;
+            if (editingHostIP && ((int)(GetTime() * 2.0f) % 2 == 0)) {
+                displayHostIP += "_";
+            }
+            DrawText(displayHostIP.c_str(), 120, 220, 20, RAYWHITE);
+
+            // 端口输入框
+            DrawText("Listen Port:", 100, 290, 18, Fade(neonCyan, 0.9f));
+            Rectangle portBox = { 100, 320, 200, 44 };
+            DrawRectangleRounded(portBox, 0.2f, 6, Fade(panelDark, 0.95f));
+            DrawRectangleRoundedLines(portBox, 0.2f, 6, editingHostPort ? neonCyan : Fade(neonBlue, 0.8f));
+            
+            std::string displayPort = hostPortStr;
+            if (editingHostPort && ((int)(GetTime() * 2.0f) % 2 == 0)) {
+                displayPort += "_";
+            }
+            DrawText(displayPort.c_str(), 120, 330, 20, RAYWHITE);
+
+            DrawText("Click to edit. Press Tab to switch fields. Press Enter to start.", 100, 400, 16, Fade(neonBlue, 0.7f));
+
+            // 按钮
+            Rectangle startButton = { 100, 450, 250, 50 };
+            Rectangle backButton3 = { 450, 450, 250, 50 };
+            bool hoverStart = CheckCollisionPointRec(mp, startButton);
+            bool hoverBack3 = CheckCollisionPointRec(mp, backButton3);
+
+            DrawNeonButton(startButton, "START HOST", hoverStart, false, neonPink);
+            DrawNeonButton(backButton3, "BACK", hoverBack3, false, { 150, 150, 150, 255 });
+
+            DrawFPS(10, 10);
+
+            EndDrawing();
+
+            // 处理鼠标点击切换编辑字段
+            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                if (CheckCollisionPointRec(mp, ipBox)) {
+                    editingHostIP = true;
+                    editingHostPort = false;
+                } else if (CheckCollisionPointRec(mp, portBox)) {
+                    editingHostIP = false;
+                    editingHostPort = true;
+                } else {
+                    editingHostIP = false;
+                    editingHostPort = false;
+                }
+            }
+
+            // IP 地址输入
+            if (editingHostIP) {
+                int key = GetCharPressed();
+                while (key > 0) {
+                    if (IsValidIPChar(key) && hostIP.size() < 15) {
+                        hostIP.push_back((char)key);
+                    }
+                    key = GetCharPressed();
+                }
+                if (IsKeyPressed(KEY_BACKSPACE) && !hostIP.empty()) {
+                    hostIP.pop_back();
+                }
+            }
+
+            // 端口输入
+            if (editingHostPort) {
+                int key = GetCharPressed();
+                while (key > 0) {
+                    if (key >= '0' && key <= '9' && hostPortStr.size() < 5) {
+                        hostPortStr.push_back((char)key);
+                    }
+                    key = GetCharPressed();
+                }
+                if (IsKeyPressed(KEY_BACKSPACE) && !hostPortStr.empty()) {
+                    hostPortStr.pop_back();
+                }
+            }
+
+            // Tab 键切换
+            if (IsKeyPressed(KEY_TAB)) {
+                editingHostIP = !editingHostIP;
+                editingHostPort = !editingHostPort;
+            }
+
+            // 处理按钮点击
+            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                if (hoverStart) {
+                    if (hostPortStr.empty()) hostPortStr = "5555";
+                    hostPort = std::atoi(hostPortStr.c_str());
+                    if (hostPort <= 0 || hostPort > 65535) hostPort = 5555;
+                    if (hostIP.empty()) hostIP = "0.0.0.0";
+                    
+                    printf("[Network] Starting HOST with IP: %s, Port: %d\n", hostIP.c_str(), hostPort);
+                    menuState = MenuState::HOST_WAITING;
+                    networkGame.StartAsHost(hostPort);
+                } else if (hoverBack3) {
+                    editingHostIP = false;
+                    editingHostPort = false;
+                    menuState = MenuState::NETWORK_MODE_SELECT;
+                }
+            }
+
+            // Enter 键启动
+            if (IsKeyPressed(KEY_ENTER)) {
+                if (hostPortStr.empty()) hostPortStr = "5555";
+                hostPort = std::atoi(hostPortStr.c_str());
+                if (hostPort <= 0 || hostPort > 65535) hostPort = 5555;
+                if (hostIP.empty()) hostIP = "0.0.0.0";
+                
+                printf("[Network] Starting HOST with IP: %s, Port: %d\n", hostIP.c_str(), hostPort);
+                editingHostIP = false;
+                editingHostPort = false;
+                menuState = MenuState::HOST_WAITING;
+                networkGame.StartAsHost(hostPort);
             }
         }
         else if (menuState == MenuState::HOST_WAITING) {
@@ -174,11 +320,11 @@ int main() {
 
             // 绘制连接信息
             char ipText[128];
-            snprintf(ipText, sizeof(ipText), "Host IP: 127.0.0.1 (Local)");
+            snprintf(ipText, sizeof(ipText), "Host IP: %s", hostIP.c_str());
             DrawText(ipText, 150, 240, 20, Fade(neonCyan, 0.9f));
 
             char portText[128];
-            snprintf(portText, sizeof(portText), "Port: %d", selectedPort);
+            snprintf(portText, sizeof(portText), "Port: %d", hostPort);
             DrawText(portText, 150, 280, 20, Fade(neonCyan, 0.9f));
 
             DrawText("Waiting for client to connect...", 150, 340, 18, Fade(neonBlue, 0.7f));
@@ -186,13 +332,15 @@ int main() {
             bool hoverBack = CheckCollisionPointRec(mp, backButton2);
             DrawNeonButton(backButton2, "BACK", hoverBack, false, { 150, 150, 150, 255 });
 
+            DrawFPS(10, 10);
+
             EndDrawing();
 
             networkGame.Update(GetFrameTime());
 
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hoverBack) {
                 networkGame.Disconnect();
-                menuState = MenuState::MAIN_MENU;
+                menuState = MenuState::NETWORK_MODE_SELECT;
             }
 
             // 主机模式下，收到客户端的板更新后再进入联机画面
@@ -202,17 +350,16 @@ int main() {
             }
         }
         else if (menuState == MenuState::CLIENT_CONNECT) {
-            Rectangle menuPanel = { 80, 80, 640, 440 };
+            Rectangle menuPanel = { 60, 60, 680, 480 };
             DrawPanel(menuPanel);
 
             const char* title = "CONNECT TO HOST";
             int titleSize = 36;
             int titleWidth = MeasureText(title, titleSize);
-            DrawText(title, screenWidth / 2 - titleWidth / 2, 120, titleSize, RAYWHITE);
+            DrawText(title, screenWidth / 2 - titleWidth / 2, 100, titleSize, RAYWHITE);
 
-            DrawText("Enter HOST IP for LAN / local testing", 150, 220, 18, Fade(neonCyan, 0.8f));
-
-            Rectangle ipBox = { 150, 250, 500, 44 };
+            DrawText("Enter HOST IP Address:", 100, 170, 18, Fade(neonCyan, 0.8f));
+            Rectangle ipBox = { 100, 200, 600, 44 };
             DrawRectangleRounded(ipBox, 0.2f, 6, Fade(panelDark, 0.95f));
             DrawRectangleRoundedLines(ipBox, 0.2f, 6, editingClientIP ? neonCyan : Fade(neonBlue, 0.8f));
 
@@ -220,21 +367,50 @@ int main() {
             if (editingClientIP && ((int)(GetTime() * 2.0f) % 2 == 0)) {
                 displayIP += "_";
             }
-            DrawText(displayIP.c_str(), 170, 260, 20, RAYWHITE);
+            DrawText(displayIP.c_str(), 120, 210, 20, RAYWHITE);
 
-            DrawText("Digits and dots only. Press Backspace to delete.", 150, 320, 16, Fade(neonBlue, 0.7f));
-            DrawText("Press Enter to connect", 150, 350, 18, Fade(neonBlue, 0.9f));
+            // 端口输入框
+            DrawText("Listen Port:", 100, 280, 18, Fade(neonCyan, 0.8f));
+            Rectangle portBox = { 100, 310, 200, 44 };
+            DrawRectangleRounded(portBox, 0.2f, 6, Fade(panelDark, 0.95f));
+            DrawRectangleRoundedLines(portBox, 0.2f, 6, editingClientPort ? neonCyan : Fade(neonBlue, 0.8f));
+            
+            std::string displayPort = clientPortStr;
+            if (editingClientPort && ((int)(GetTime() * 2.0f) % 2 == 0)) {
+                displayPort += "_";
+            }
+            DrawText(displayPort.c_str(), 120, 320, 20, RAYWHITE);
 
-            bool hoverBack = CheckCollisionPointRec(mp, backButton);
-            DrawNeonButton(backButton, "BACK", hoverBack, false, { 150, 150, 150, 255 });
+            DrawText("Digits and dots only for IP. Press Tab to switch. Press Enter to connect.", 100, 380, 14, Fade(neonBlue, 0.7f));
+
+            // 按钮
+            Rectangle connectButton = { 100, 420, 250, 50 };
+            Rectangle backButton3 = { 450, 420, 250, 50 };
+            bool hoverConnect = CheckCollisionPointRec(mp, connectButton);
+            bool hoverBack3 = CheckCollisionPointRec(mp, backButton3);
+
+            DrawNeonButton(connectButton, "CONNECT", hoverConnect, false, neonBlue);
+            DrawNeonButton(backButton3, "BACK", hoverBack3, false, { 150, 150, 150, 255 });
+
+            DrawFPS(10, 10);
 
             EndDrawing();
 
-            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hoverBack) {
-                editingClientIP = false;
-                menuState = MenuState::MAIN_MENU;
+            // 处理鼠标点击切换编辑字段
+            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                if (CheckCollisionPointRec(mp, ipBox)) {
+                    editingClientIP = true;
+                    editingClientPort = false;
+                } else if (CheckCollisionPointRec(mp, portBox)) {
+                    editingClientIP = false;
+                    editingClientPort = true;
+                } else {
+                    editingClientIP = false;
+                    editingClientPort = false;
+                }
             }
 
+            // IP 地址输入
             if (editingClientIP) {
                 int key = GetCharPressed();
                 while (key > 0) {
@@ -243,20 +419,65 @@ int main() {
                     }
                     key = GetCharPressed();
                 }
-
                 if (IsKeyPressed(KEY_BACKSPACE) && !clientIP.empty()) {
                     clientIP.pop_back();
                 }
             }
 
-            if (IsKeyPressed(KEY_ENTER)) {
-                editingClientIP = false;
-                if (clientIP.empty()) {
-                    clientIP = "127.0.0.1";
+            // 端口输入
+            if (editingClientPort) {
+                int key = GetCharPressed();
+                while (key > 0) {
+                    if (key >= '0' && key <= '9' && clientPortStr.size() < 5) {
+                        clientPortStr.push_back((char)key);
+                    }
+                    key = GetCharPressed();
                 }
+                if (IsKeyPressed(KEY_BACKSPACE) && !clientPortStr.empty()) {
+                    clientPortStr.pop_back();
+                }
+            }
 
-                if (networkGame.ConnectAsClient(clientIP.c_str(), selectedPort)) {
-                    printf("[Network] Connecting to %s:%d\n", clientIP.c_str(), selectedPort);
+            // Tab 键切换
+            if (IsKeyPressed(KEY_TAB)) {
+                editingClientIP = !editingClientIP;
+                editingClientPort = !editingClientPort;
+            }
+
+            // 处理按钮点击
+            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                if (hoverConnect) {
+                    if (clientPortStr.empty()) clientPortStr = "5555";
+                    clientPort = std::atoi(clientPortStr.c_str());
+                    if (clientPort <= 0 || clientPort > 65535) clientPort = 5555;
+                    if (clientIP.empty()) clientIP = "127.0.0.1";
+
+                    if (networkGame.ConnectAsClient(clientIP.c_str(), clientPort)) {
+                        printf("[Network] Connecting to %s:%d\n", clientIP.c_str(), clientPort);
+                        editingClientIP = false;
+                        editingClientPort = false;
+                        menuState = MenuState::NETWORK_PLAYING;
+                    } else {
+                        printf("[Network] Connection failed!\n");
+                    }
+                } else if (hoverBack3) {
+                    editingClientIP = false;
+                    editingClientPort = false;
+                    menuState = MenuState::NETWORK_MODE_SELECT;
+                }
+            }
+
+            // Enter 键连接
+            if (IsKeyPressed(KEY_ENTER)) {
+                if (clientPortStr.empty()) clientPortStr = "5555";
+                clientPort = std::atoi(clientPortStr.c_str());
+                if (clientPort <= 0 || clientPort > 65535) clientPort = 5555;
+                if (clientIP.empty()) clientIP = "127.0.0.1";
+
+                if (networkGame.ConnectAsClient(clientIP.c_str(), clientPort)) {
+                    printf("[Network] Connecting to %s:%d\n", clientIP.c_str(), clientPort);
+                    editingClientIP = false;
+                    editingClientPort = false;
                     menuState = MenuState::NETWORK_PLAYING;
                 } else {
                     printf("[Network] Connection failed!\n");
@@ -264,6 +485,8 @@ int main() {
             }
         }
         else if (menuState == MenuState::OFFLINE_GAME) {
+            DrawFPS(10, 10);
+
             EndDrawing();
             // 运行离线游戏
             GameApp offlineApp;
@@ -298,8 +521,16 @@ int main() {
         if (IsKeyPressed(KEY_ESCAPE)) {
             if (menuState == MenuState::HOST_WAITING || menuState == MenuState::CLIENT_CONNECT) {
                 networkGame.Disconnect();
+                editingClientIP = false;
+                editingClientPort = false;
+                menuState = MenuState::NETWORK_MODE_SELECT;
+            } else if (menuState == MenuState::HOST_CONFIG) {
+                editingHostIP = false;
+                editingHostPort = false;
+                menuState = MenuState::NETWORK_MODE_SELECT;
+            } else {
+                menuState = MenuState::MAIN_MENU;
             }
-            menuState = MenuState::MAIN_MENU;
         }
     }
 

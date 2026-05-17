@@ -165,7 +165,8 @@ int Run() {
     const int screenHeight = 600;
     InitWindow(screenWidth, screenHeight, "Brick Breaker Game");
     SetExitKey(KEY_NULL);
-    SetTargetFPS(60);
+    // 取消固定帧率限制（不调用 SetTargetFPS），让渲染不受限制
+    // SetTargetFPS(60);
 
     bool enetReady = (enet_initialize() == 0);
 
@@ -824,6 +825,8 @@ int Run() {
                 DrawText(net.statusText, 160, 160, 18, net.connected ? Fade(neonCyan, 0.9f) : Fade(neonPink, 0.9f));
             }
 
+            DrawFPS(10, 10);
+
             EndDrawing();
 
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hoverModeOffline) {
@@ -949,6 +952,8 @@ int Run() {
             DrawNeonButton(restartButton, "RESTART", hoverRestart, false, neonCyan);
             DrawNeonButton(quitButton, "QUIT", hoverQuit, false, neonPink);
 
+            DrawFPS(10, 10);
+
             EndDrawing();
 
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hoverMenu) {
@@ -997,6 +1002,8 @@ int Run() {
             bool hover = CheckCollisionPointRec(mp, restartButton);
             DrawNeonButton(restartButton, "RESTART", hover, false, neonCyan);
 
+            DrawFPS(10, 10);
+
             EndDrawing();
 
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hover) {
@@ -1038,6 +1045,8 @@ int Run() {
 
             bool hover = CheckCollisionPointRec(mp, restartButton);
             DrawNeonButton(restartButton, "RESTART", hover, false, neonPink);
+
+            DrawFPS(10, 10);
 
             EndDrawing();
 
@@ -1335,6 +1344,8 @@ int Run() {
         for (int i = 0; i < lives; ++i) {
             DrawRectangleRounded({ (float)(618 + i * 30), (float)livesY, 16, 12 }, 0.35f, 4, Fade(neonPink, 0.9f));
         }
+
+        DrawFPS(10, 10);
 
         EndDrawing();
     }

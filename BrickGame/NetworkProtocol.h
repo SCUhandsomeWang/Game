@@ -16,6 +16,13 @@ enum class MessageType : uint8_t {
     GAME_START = 4,         // 游戏开始
     GAME_OVER = 5,          // 游戏结束
     SCORE_UPDATE = 6        // 分数更新
+    , ROOM_STATE = 7        // 房间/大厅状态（主机广播）
+    , GAME_STATE_SNAPSHOT = 8 // 完整游戏快照（砖块/道具完整数据）
+};
+
+// 房间状态消息（主机广播当前房间信息给客户端）
+enum class RoomMsgFlags : uint8_t {
+    NONE = 0
 };
 
 // 网络消息基类
@@ -35,13 +42,45 @@ struct NetworkMessage {
 struct HelloMessage : public NetworkMessage {
     bool isHost;
     char playerName[32];
+    uint8_t avatarIndex;
+    uint8_t ready;
     
     HelloMessage() : NetworkMessage(MessageType::HELLO), isHost(false) {
         memset(playerName, 0, sizeof(playerName));
+        avatarIndex = 0;
+        ready = 0;
     }
     
     size_t GetSize() const override {
-        return sizeof(MessageType) + sizeof(uint32_t) + sizeof(bool) + sizeof(playerName);
+        return sizeof(MessageType) + sizeof(uint32_t) + sizeof(bool) + sizeof(playerName) + sizeof(uint8_t) * 2;
+    }
+};
+
+// 房间状态消息 - 固定两个玩家（host 与 guest）
+struct RoomStateMessage : public NetworkMessage {
+    char hostName[32];
+    uint8_t hostAvatar;
+    uint8_t hostReady;
+
+    char guestName[32];
+    uint8_t guestAvatar;
+    uint8_t guestReady;
+
+    uint8_t selectedLevel;
+    uint8_t playerCount; // 1 或 2
+
+    RoomStateMessage() : NetworkMessage(MessageType::ROOM_STATE) {
+        memset(hostName, 0, sizeof(hostName));
+        hostAvatar = 0; hostReady = 0;
+        memset(guestName, 0, sizeof(guestName));
+        guestAvatar = 0; guestReady = 0;
+        selectedLevel = 0;
+        playerCount = 1;
+    }
+
+    size_t GetSize() const override {
+        return sizeof(MessageType) + sizeof(uint32_t) +
+               sizeof(hostName) + sizeof(uint8_t) * 5 + sizeof(guestName);
     }
 };
 
@@ -105,6 +144,7 @@ struct PowerUpStateData {
 
 // 游戏状态消息（主机发送）
 struct GameStateMessage : public NetworkMessage {
+    uint32_t seq;
     BallStateData ball;
     PaddleStateData hostPaddle;
     PaddleStateData guestPaddle;
@@ -121,6 +161,7 @@ struct GameStateMessage : public NetworkMessage {
     
     GameStateMessage() 
         : NetworkMessage(MessageType::GAME_STATE),
+          seq(0),
                     hostScore(0), guestScore(0), hostLives(3), guestLives(3),
                     brickCount(0), powerUpCount(0), widePaddleActive(0), frenzyActive(0) {
                 memset(brickActive, 0, sizeof(brickActive));
@@ -130,7 +171,7 @@ struct GameStateMessage : public NetworkMessage {
         }
     
     size_t GetSize() const override {
-        return sizeof(MessageType) + sizeof(uint32_t) + 
+        return sizeof(MessageType) + sizeof(uint32_t) + sizeof(uint32_t) + 
                sizeof(BallStateData) + sizeof(PaddleStateData) * 2 +
                sizeof(int) * 6 +
                sizeof(brickActive) +
