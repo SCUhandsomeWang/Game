@@ -21,6 +21,7 @@
 #include "Paddle.h"
 #include "Brick.h"
 #include "PowerUp.h"
+#include "Profiling.h"
 #include <enet/enet.h>
 #include <algorithm>
 #include <vector>
@@ -215,7 +216,13 @@ int Run() {
 
     auto ClearObjects = [&]() {
         for (GameObject* object : objects) {
-            delete object;
+            PowerUp* pu = dynamic_cast<PowerUp*>(object);
+            if (pu) {
+                PowerUpPool::Release(pu);
+            }
+            else {
+                delete object;
+            }
         }
         objects.clear();
         bricks.clear();
@@ -568,7 +575,7 @@ int Run() {
             powerUps.pop_back();
         }
         while ((int)powerUps.size() < targetPowerCount) {
-            PowerUp* p = new PowerUp({ 0, 0 }, PowerUpType::SplitBalls);
+            PowerUp* p = PowerUpPool::Acquire({ 0, 0 }, PowerUpType::SplitBalls);
             powerUps.push_back(p);
             objects.push_back(p);
         }
@@ -577,8 +584,8 @@ int Run() {
             PowerUpType type = (PowerUpType)ss.powerUps[i].type;
             if (powerUps[i]->GetType() != type) {
                 RemoveObject(powerUps[i]);
-                delete powerUps[i];
-                PowerUp* p = new PowerUp({ ss.powerUps[i].x, ss.powerUps[i].y }, type);
+                PowerUpPool::Release(powerUps[i]);
+                PowerUp* p = PowerUpPool::Acquire({ ss.powerUps[i].x, ss.powerUps[i].y }, type);
                 powerUps[i] = p;
                 objects.push_back(p);
             }
@@ -736,6 +743,8 @@ int Run() {
     };
 
     while (!WindowShouldClose()) {
+        ZoneScoped;
+        FrameMark;
         Vector2 mp = GetMousePosition();
         float uiTime = (float)GetTime();
 
@@ -1181,7 +1190,7 @@ int Run() {
                                 type = PowerUpType::Frenzy;
                             }
                             Vector2 pos = brick->GetPosition();
-                            PowerUp* pu = new PowerUp(pos, type);
+                            PowerUp* pu = PowerUpPool::Acquire(pos, type);
                             powerUps.push_back(pu);
                             objects.push_back(pu);
                         }
@@ -1243,7 +1252,7 @@ int Run() {
 
                 if (removePowerUp) {
                     RemoveObject(pu);
-                    delete pu;
+                    PowerUpPool::Release(pu);
                     powerUps.erase(powerUps.begin() + (int)i);
                 }
                 else {
@@ -1357,6 +1366,7 @@ int Run() {
     if (enetReady) {
         enet_deinitialize();
     }
+    PowerUpPool::ClearPool();
     return 0;
 }
 };

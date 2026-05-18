@@ -1,0 +1,3 @@
+[submodule "BrickGame/tracy"]
+	path = BrickGame/tracy
+	url = https://github.com/wolfpld/tracy

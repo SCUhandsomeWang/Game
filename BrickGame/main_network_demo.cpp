@@ -104,7 +104,7 @@ int main(int argc, char* argv[]) {
         bricks.clear();
 
         for (PowerUp* pu : powerUps) {
-            delete pu;
+            PowerUpPool::Release(pu);
         }
         powerUps.clear();
     };
@@ -157,7 +157,7 @@ int main(int argc, char* argv[]) {
         scoreMultiplier = 1;
 
         for (PowerUp* pu : powerUps) {
-            delete pu;
+            PowerUpPool::Release(pu);
         }
         powerUps.clear();
         CreateBricks();
@@ -248,9 +248,9 @@ int main(int argc, char* argv[]) {
                         teamScore += (brick->IsGolden() ? 20 : 10) * scoreMultiplier;
 
                         if ((i % 7) == 0) {
-                            powerUps.push_back(new PowerUp(brick->GetPosition(), PowerUpType::WidePaddle));
+                            powerUps.push_back(PowerUpPool::Acquire(brick->GetPosition(), PowerUpType::WidePaddle));
                         } else if ((i % 11) == 0) {
-                            powerUps.push_back(new PowerUp(brick->GetPosition(), PowerUpType::Frenzy));
+                            powerUps.push_back(PowerUpPool::Acquire(brick->GetPosition(), PowerUpType::Frenzy));
                         }
                         break;
                     }
@@ -280,7 +280,7 @@ int main(int argc, char* argv[]) {
                     }
 
                     if (removePowerUp) {
-                        delete pu;
+                        PowerUpPool::Release(pu);
                         powerUps.erase(powerUps.begin() + (int)i);
                     } else {
                         ++i;
@@ -378,7 +378,7 @@ int main(int argc, char* argv[]) {
                 }
 
                 for (PowerUp* pu : powerUps) {
-                    delete pu;
+                    PowerUpPool::Release(pu);
                 }
                 powerUps.clear();
 
@@ -392,7 +392,7 @@ int main(int argc, char* argv[]) {
                         type = PowerUpType::Frenzy;
                     }
 
-                    PowerUp* pu = new PowerUp({ netPu.posX, netPu.posY }, type, 0.0f);
+                    PowerUp* pu = PowerUpPool::Acquire({ netPu.posX, netPu.posY }, type, 0.0f);
                     pu->SetActive(netPu.active != 0);
                     powerUps.push_back(pu);
                 }
@@ -483,5 +483,6 @@ int main(int argc, char* argv[]) {
     CloseWindow();
 
     printf("[Main] Network game ended\n");
+    PowerUpPool::ClearPool();
     return 0;
 }

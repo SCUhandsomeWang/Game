@@ -2,6 +2,7 @@
 #include "NetworkGameMode.h"
 #include "GameApp.h"
 #include "NetworkGameMode.h"
+#include "Profiling.h"
 #include <string>
 #include <cstdio>
 #include <cstdlib>
@@ -135,6 +136,8 @@ int main(int argc, char* argv[]) {
     Rectangle backButton2 = { 300, 500, 200, 60 };
 
     while (menuState != MenuState::EXIT && !WindowShouldClose()) {
+        ZoneScoped;
+        FrameMark;
         float uiTime = (float)GetTime();
         Vector2 mp = GetMousePosition();
 
