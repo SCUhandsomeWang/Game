@@ -31,6 +31,9 @@
 #include <ctime>
 #include <cstdio>
 #include <cmath>
+#include <fstream>
+#include <sstream>
+#include <string>
 
 class ScoreCalculator {
 public:
@@ -166,8 +169,8 @@ int Run() {
     const int screenHeight = 600;
     InitWindow(screenWidth, screenHeight, "Brick Breaker Game");
     SetExitKey(KEY_NULL);
-    // 取消固定帧率限制（不调用 SetTargetFPS），让渲染不受限制
-    // SetTargetFPS(60);
+    // 限制帧率为 60 FPS，稳定渲染并降低 CPU 占用
+    SetTargetFPS(60);
 
     bool enetReady = (enet_initialize() == 0);
 
@@ -201,6 +204,153 @@ int Run() {
     const int gapX = 8;
     const int gapY = 6;
     int rowsCount = config.rows;
+
+    // Level data loaded from JSON: levels[levelIndex][row][col] -> int type
+    std::vector<std::vector<std::vector<int>>> levelsData;
+    int currentLevel = 0;
+    auto ParseLevelsJSON = [&](const std::string& content)->bool {
+        levelsData.clear();
+        size_t i = 0;
+        // find first '['
+        while (i < content.size() && content[i] != '[') ++i;
+        if (i == content.size()) return false;
+        // parse nested arrays of numbers: [[[...],[...]], [[...]]]
+        std::vector<std::vector<int>> rows;
+        std::vector<int> nums;
+        std::vector<std::vector<std::vector<int>>> tempLevels;
+        int depth = 0;
+        bool inNumber = false;
+        int sign = 1;
+        int value = 0;
+        std::vector<std::vector<int>> curLevel;
+        std::vector<int> curRow;
+        for (; i < content.size(); ++i) {
+            char c = content[i];
+            if (c == '[') {
+                depth++;
+                if (depth == 2) { curLevel.clear(); }
+                if (depth == 3) { curRow.clear(); }
+                inNumber = false;
+                sign = 1; value = 0;
+            }
+            else if (c == ']') {
+                if (inNumber) {
+                    curRow.push_back(sign * value);
+                    inNumber = false;
+                }
+                if (depth == 3) {
+                    // finish a row
+                    curLevel.push_back(curRow);
+                }
+                else if (depth == 2) {
+                    // finish a level
+                    if (!curLevel.empty()) tempLevels.push_back(curLevel);
+                }
+                depth--;
+            }
+            else if ((c >= '0' && c <= '9')) {
+                inNumber = true;
+                value = value * 10 + (c - '0');
+            }
+            else if (c == '-') {
+                sign = -1;
+            }
+            else {
+                if (inNumber) {
+                    curRow.push_back(sign * value);
+                    inNumber = false;
+                    sign = 1; value = 0;
+                }
+            }
+        }
+        // move tempLevels into levelsData (note tempLevels is vector of levels each containing rows)
+        if (tempLevels.empty()) return false;
+        levelsData.clear();
+        for (auto &lvl : tempLevels) {
+            levelsData.push_back(lvl);
+        }
+        return !levelsData.empty();
+    };
+
+    auto LoadLevelsFromFile = [&]()->bool {
+        std::ifstream ifs("BrickGame/levels/levels.json");
+        if (!ifs.is_open()) return false;
+        std::stringstream ss; ss << ifs.rdbuf();
+        std::string content = ss.str();
+        return ParseLevelsJSON(content);
+    };
+
+    // Save/load progress
+    auto SaveProgress = [&](int lvl, int sc, int lv)->bool {
+        std::ofstream ofs("BrickGame/savegame.json");
+        if (!ofs.is_open()) return false;
+        ofs << "{\n";
+        ofs << "  \"level\": " << lvl << ",\n";
+        ofs << "  \"score\": " << sc << ",\n";
+        ofs << "  \"lives\": " << lv << "\n";
+        ofs << "}\n";
+        ofs.close();
+        return true;
+    };
+
+    bool hasSave = false;
+    int savedLevel = 0;
+    int savedScore = 0;
+    int savedLives = 0;
+    auto TryLoadSaveOnStart = [&]()->void {
+        std::ifstream ifs("BrickGame/savegame.json");
+        if (!ifs.is_open()) { hasSave = false; return; }
+        std::stringstream ss; ss << ifs.rdbuf();
+        std::string s = ss.str();
+        // naive parse: find level, score, lives
+        size_t p = s.find("\"level\"");
+        if (p == std::string::npos) { hasSave = false; return; }
+        auto readIntAfter = [&](const std::string& key)->int {
+            size_t q = s.find(key);
+            if (q == std::string::npos) return 0;
+            q = s.find_first_of("0123456789-", q + key.size());
+            if (q == std::string::npos) return 0;
+            int sign = 1; size_t idx = q;
+            if (s[idx] == '-') { sign = -1; idx++; }
+            int val = 0;
+            while (idx < s.size() && isdigit((unsigned char)s[idx])) { val = val*10 + (s[idx]-'0'); idx++; }
+            return sign * val;
+        };
+        savedLevel = readIntAfter("\"level\"");
+        savedScore = readIntAfter("\"score\"");
+        savedLives = readIntAfter("\"lives\"");
+        hasSave = true;
+    };
+
+    // attempt to load levels from file now
+    bool levelsLoaded = LoadLevelsFromFile();
+
+    auto LoadLevelLayout = [&](int levelIndex)->bool {
+        if (levelIndex < 0 || levelIndex >= (int)levelsData.size()) return false;
+        auto &layout = levelsData[levelIndex];
+        // compute rowsCount from layout
+        int layoutRows = (int)layout.size();
+        if (layoutRows <= 0) return false;
+        rowsCount = layoutRows;
+        int cols = (int)layout[0].size();
+        int usableWidth = screenWidth - 2 * wallThickness;
+        int totalBricksWidth = cols * (int)brickWidth + (cols - 1) * gapX;
+        float startX = wallThickness + (usableWidth - totalBricksWidth) / 2.0f;
+        float startY = 80.0f;
+        for (int r = 0; r < layoutRows; ++r) {
+            for (int c = 0; c < cols; ++c) {
+                int type = 0;
+                if (c < (int)layout[r].size()) type = layout[r][c];
+                if (type == 0) continue;
+                float x = startX + c * (brickWidth + gapX);
+                float y = startY + r * (brickHeight + gapY);
+                Brick* brick = new Brick(x, y, brickWidth, brickHeight, type);
+                bricks.push_back(brick);
+                objects.push_back(brick);
+            }
+        }
+        return true;
+    };
 
     int score = 0;
     int lives = config.lives;
@@ -255,6 +405,15 @@ int Run() {
     };
 
     auto CreateBricks = [&]() {
+        // If level JSON loaded, try to use layout for current level
+        if (levelsLoaded && !levelsData.empty()) {
+            if (currentLevel < 0) currentLevel = 0;
+            if (currentLevel >= (int)levelsData.size()) currentLevel = (int)levelsData.size() - 1;
+            if (LoadLevelLayout(currentLevel)) {
+                return;
+            }
+            // fallback to default if layout failed
+        }
         int usableWidth = screenWidth - 2 * wallThickness;
         int cols = (usableWidth + gapX) / ((int)brickWidth + gapX);
         if (cols < 1) {
@@ -269,7 +428,7 @@ int Run() {
             for (int c = 0; c < cols; ++c) {
                 float x = startX + c * (brickWidth + gapX);
                 float y = startY + r * (brickHeight + gapY);
-                Brick* brick = new Brick(x, y, brickWidth, brickHeight);
+                Brick* brick = new Brick(x, y, brickWidth, brickHeight, 1);
                 bricks.push_back(brick);
                 objects.push_back(brick);
             }
@@ -672,6 +831,9 @@ int Run() {
     CreateGameObjects();
 
     ClearObjects();
+    // check save at start
+    TryLoadSaveOnStart();
+    bool resumeDialogActive = hasSave;
 
     Rectangle startButton = { (float)(screenWidth / 2 - 100), (float)(screenHeight / 2 - 30), 200.0f, 60.0f };
     Rectangle offlineButton = { (float)(screenWidth / 2 - 220), (float)(screenHeight / 2 - 95), 140.0f, 44.0f };
@@ -747,6 +909,11 @@ int Run() {
         FrameMark;
         Vector2 mp = GetMousePosition();
         float uiTime = (float)GetTime();
+
+        if (IsKeyPressed(KEY_F5)) {
+            SaveProgress(currentLevel, score, lives);
+            printf("[Save] level=%d score=%d lives=%d\n", currentLevel, score, lives);
+        }
 
         ProcessNetworkEvents();
 
@@ -835,6 +1002,40 @@ int Run() {
             }
 
             DrawFPS(10, 10);
+
+            // If a save exists, draw resume dialog on top
+            if (resumeDialogActive && hasSave) {
+                Rectangle dlg = { (float)(screenWidth/2 - 180), (float)(screenHeight/2 - 60), 360.0f, 120.0f };
+                DrawPanel(dlg);
+                const char* msg = "Saved game found. Continue?";
+                int msize = 20;
+                int mw = MeasureText(msg, msize);
+                DrawText(msg, (int)(dlg.x + dlg.width/2 - mw/2), (int)(dlg.y + 18), msize, RAYWHITE);
+
+                Rectangle yesRect = { dlg.x + 40, dlg.y + dlg.height - 50, 120, 36 };
+                Rectangle noRect = { dlg.x + dlg.width - 160, dlg.y + dlg.height - 50, 120, 36 };
+                bool hoverYes = CheckCollisionPointRec(mp, yesRect);
+                bool hoverNo = CheckCollisionPointRec(mp, noRect);
+                DrawNeonButton(yesRect, "YES", hoverYes, false, neonCyan);
+                DrawNeonButton(noRect, "NO", hoverNo, false, neonPink);
+
+                if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hoverYes) {
+                    // load saved progress
+                    currentLevel = savedLevel;
+                    score = savedScore;
+                    lives = savedLives;
+                    CreateGameObjects();
+                    state = State::Playing;
+                    resumeDialogActive = false;
+                    hasSave = false;
+                }
+                if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hoverNo) {
+                    // discard save
+                    std::remove("BrickGame/savegame.json");
+                    hasSave = false;
+                    resumeDialogActive = false;
+                }
+            }
 
             EndDrawing();
 
@@ -1014,6 +1215,27 @@ int Run() {
             DrawFPS(10, 10);
 
             EndDrawing();
+
+            // auto-advance to next level if available
+            static float victoryStartTime = 0.0f;
+            if (victoryStartTime == 0.0f) victoryStartTime = (float)GetTime();
+            float elapsed = (float)GetTime() - victoryStartTime;
+            if (levelsLoaded && (currentLevel + 1) < (int)levelsData.size() && elapsed >= 2.0f) {
+                // advance to next level
+                currentLevel++;
+                SaveProgress(currentLevel, score, lives);
+                net.sessionSeed = (uint32_t)rand();
+                srand(net.sessionSeed);
+                CreateGameObjects();
+                if (netMode == NetMode::Host) SendHostStart();
+                state = State::Playing;
+                victoryStartTime = 0.0f;
+            }
+            else if (elapsed >= 6.0f) {
+                // fallback: return to menu after a longer delay
+                state = State::Start;
+                victoryStartTime = 0.0f;
+            }
 
             if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hover) {
                 if (netMode == NetMode::Client) {

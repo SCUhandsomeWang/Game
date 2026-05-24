@@ -11,10 +11,23 @@ private:
     Color color;
     bool active;
     bool isGolden;
+    int type;
 
 public:
-    Brick(float x, float y, float w, float h, Color c = GREEN)
-        : GameObject({ x, y }), width(w), height(h), color(c), active(true), isGolden((rand() % 100) < 20) {
+    // type: 0 = empty(not used), 1 = normal, 2 = gold, 3 = harmful/damage
+    Brick(float x, float y, float w, float h, int t = 1)
+        : GameObject({ x, y }), width(w), height(h), color(GREEN), active(true), isGolden(false), type(t) {
+        if (type == 2) {
+            isGolden = true;
+            color = GOLD;
+        }
+        else if (type == 3) {
+            isGolden = false;
+            color = RED;
+        }
+        else {
+            color = GREEN;
+        }
     }
 
     void Update() override {
@@ -37,6 +50,10 @@ public:
 
     bool IsGolden() const {
         return isGolden;
+    }
+
+    int GetType() const {
+        return type;
     }
 
     Rectangle GetRect() const {
