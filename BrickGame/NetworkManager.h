@@ -54,6 +54,15 @@
 #endif
 #endif
 
+// NetworkManager: 简化的网络层封装，用于主机/客户端的 UDP 通信与消息序列化。
+// 是什么: 管理 UDP socket、收发线程、消息序列化/反序列化与接收队列（GameState、PaddleUpdate、Hello 等）。
+// 为什么: 将网络细节从游戏逻辑中抽离，提供发送紧凑增量状态 (`SendGameState`) 与完整快照
+// (`SendGameStateSnapshot`) 的接口，以及握手/房间管理消息，便于主机与客户端实现同步逻辑。
+// 怎么用: 对于主机调用 `StartAsHost(port)`，对于客户端调用 `ConnectAsClient(serverIP, port)`。
+// 调用 `SendPaddleUpdate` / `SendHelloMessage` 等函数发送消息；通过 `GetReceivedGameState` 等
+// 方法从接收队列中拉取消息。注意：类内部使用后台线程 (`StartReceiveThread`) 接收数据，
+// 在销毁前应调用 `Shutdown()` 以停止线程并关闭 sockets。
+
 class NetworkManager {
 public:
     enum class Mode {
@@ -505,8 +514,11 @@ public:
                     state.guestScore = read_int(off);
                     state.hostLives = read_int(off);
                     state.guestLives = read_int(off);
-                    state.brickCount = read_int(off);
-                    // DO NOT parse per-brick active array here; client will rely on latest snapshot
+                    // Delta message includes only minimal brick count metadata.
+                    // Mark brickCount as -1 to indicate this delta does NOT contain per-brick active array.
+                    int tmpBrickCount = read_int(off);
+                    (void)tmpBrickCount;
+                    state.brickCount = -1;
                     state.powerUpCount = 0;
                     state.widePaddleActive = read_u8(off);
                     state.frenzyActive = read_u8(off);

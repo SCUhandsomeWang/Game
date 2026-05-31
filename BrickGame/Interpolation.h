@@ -70,13 +70,12 @@ public:
             return;
         }
 
-        // 基于速度进行插值
+        // 基于速度进行插值（使用线性插值，保持恒定速度，避免减速）
         float step = obj.interpolationSpeed * deltaTime;
         
-        // 使用缓动函数
+        // 线性插值，不使用缓动函数，保持球的实际速度恒定
         if (step < 1.0f) {
-            float easedStep = EaseOutQuad(step);
-            obj.currentPos = LerpVector(obj.currentPos, obj.targetPos, easedStep);
+            obj.currentPos = LerpVector(obj.currentPos, obj.targetPos, step);
         } else {
             obj.currentPos = obj.targetPos;
             obj.isInterpolating = false;

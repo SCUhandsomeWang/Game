@@ -6,3 +6,6 @@ Release/
 *.suo
 *.sln
 BrickGame/build/
+logs/
+*.log
+releases/

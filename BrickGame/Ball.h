@@ -3,6 +3,13 @@
 
 #include "GameObject.h"
 
+// Ball: 表示游戏中的球实体。
+// 是什么: 包含位置、速度、半径、颜色与可见性等状态，并负责自身的更新与绘制。
+// 为什么: 将球的物理行为（边界反弹、速度增长、出界检测）与渲染封装，保持主循环简洁。
+// 怎么用: 在游戏初始化时创建 `Ball` 实例；每帧调用 `Update()` 与 `Draw()`；当球与矩形碰撞时
+// 使用 `BounceRect()` 处理反弹并触发速度增加；调用 `Launch()` 启动球。
+
+
 class Ball : public GameObject {
 private:
     Vector2 velocity;

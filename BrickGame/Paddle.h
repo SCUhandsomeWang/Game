@@ -3,6 +3,13 @@
 
 #include "GameObject.h"
 
+// Paddle: 玩家控制的挡板实体。
+// 是什么: 封装挡板位置、尺寸、输入控制（鼠标/禁用）与边界约束逻辑。
+// 为什么: 将输入与边界限制放在挡板内部，简化游戏主循环与碰撞检测代码。
+// 怎么用: 创建后每帧调用 `Update()`（若启用鼠标控制会根据鼠标 X 更新位置），使用
+// `GetRect()` 获取用于碰撞检测的矩形，或通过 `SetCenterX()`/`SetWidth()` 调整外部状态。
+
+
 class Paddle : public GameObject {
 private:
     float width;

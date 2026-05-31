@@ -4,6 +4,13 @@
 #include "GameObject.h"
 #include <cstdlib>
 
+// Brick: 关卡中的单个砖块。
+// 是什么: 保存尺寸、颜色、是否激活与类型（普通/金砖/有害）。
+// 为什么: 以轻量对象表示每个砖块，便于关卡数据（激活状态、道具掉落）管理与序列化。
+// 怎么用: 使用构造函数指定位置与类型；游戏逻辑在击中砖块后调用 `SetActive(false)`
+// 并根据 `GetType()` / `IsGolden()` 决定得分或特殊行为；调用 `GetRect()` 参与碰撞检测。
+
+
 class Brick : public GameObject {
 private:
     float width;

@@ -21,6 +21,10 @@ private:
     // 游戏状态缓存
     GameStateMessage lastReceivedState;
     PaddleUpdateMessage lastReceivedPaddleUpdate;
+    
+    // 追踪是否已收到第一个消息，用于初始化位置
+    bool firstGameStateReceived = false;
+    bool firstPaddleUpdateReceived = false;
 
     // 房间/玩家信息（仅支持最多2人）
     std::string localPlayerName;
@@ -237,6 +241,11 @@ public:
             remoteBallInterp.isInterpolating = true;
             remoteBallInterp.interpolationSpeed = NetworkConfig::BALL_INTERPOLATION_SPEED;
             
+            // 第一次收到游戏状态时，直接初始化球的当前位置，避免从 {0,0} 插值
+            if (!firstGameStateReceived) {
+                remoteBallInterp.currentPos = remoteBallInterp.targetPos;
+            }
+            
             // 更新远程板的插值目标（取决于是主机还是客户端）
             if (GetMode() == NetworkManager::Mode::CLIENT) {
                 remotePaddleInterp.targetPos = gameState.hostPaddle.GetPosition();
@@ -245,6 +254,12 @@ public:
             }
             remotePaddleInterp.isInterpolating = true;
             remotePaddleInterp.interpolationSpeed = NetworkConfig::PADDLE_INTERPOLATION_SPEED;
+            
+            // 第一次收到游戏状态时，直接初始化板的当前位置，避免从 {0,0} 插值
+            if (!firstGameStateReceived) {
+                remotePaddleInterp.currentPos = remotePaddleInterp.targetPos;
+                firstGameStateReceived = true;
+            }
         }
         
         // 处理接收到的板更新
@@ -253,6 +268,12 @@ public:
             lastReceivedPaddleUpdate = paddleUpdate;
             remotePaddleInterp.targetPos = paddleUpdate.paddle.GetPosition();
             remotePaddleInterp.isInterpolating = true;
+            
+            // 第一次收到板更新时，直接初始化当前位置，避免从 {0,0} 插值
+            if (!firstPaddleUpdateReceived) {
+                remotePaddleInterp.currentPos = remotePaddleInterp.targetPos;
+                firstPaddleUpdateReceived = true;
+            }
         }
         
         // 更新插值
@@ -309,6 +330,12 @@ public:
     
     void Disconnect() {
         networkManager.Shutdown();
+        // 重置初始化标志，下次连接时可重新初始化位置
+        firstGameStateReceived = false;
+        firstPaddleUpdateReceived = false;
+        // 重置插值对象
+        remotePaddleInterp = InterpolationSmoothing::CreatePaddleInterpolation({0, 0});
+        remoteBallInterp = InterpolationSmoothing::CreateBallInterpolation({0, 0});
     }
 };
 

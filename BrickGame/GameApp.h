@@ -25,6 +25,7 @@
 #include <enet/enet.h>
 #include <algorithm>
 #include <vector>
+#include <map>
 #include <cstdint>
 #include <cstring>
 #include <cstdlib>
@@ -287,7 +288,16 @@ int Run() {
         ofs << "{\n";
         ofs << "  \"level\": " << lvl << ",\n";
         ofs << "  \"score\": " << sc << ",\n";
-        ofs << "  \"lives\": " << lv << "\n";
+        ofs << "  \"lives\": " << lv << ",\n";
+        ofs << "  \"difficulty\": " << (int)selectedDifficulty << ",\n";
+        ofs << "  \"brickCount\": " << (int)bricks.size() << ",\n";
+        ofs << "  \"brickStates\": [";
+        for (size_t i = 0; i < bricks.size(); ++i) {
+            if (i > 0) ofs << ", ";
+            ofs << (bricks[i]->IsActive() ? 1 : 0);
+        }
+        ofs << "],\n";
+        ofs << "  \"ballLaunched\": " << (balls.empty() || !balls[0]->IsLaunched() ? 0 : 1) << "\n";
         ofs << "}\n";
         ofs.close();
         return true;
@@ -297,14 +307,17 @@ int Run() {
     int savedLevel = 0;
     int savedScore = 0;
     int savedLives = 0;
+    int savedDifficulty = 1; // Normal by default
+    int savedBrickCount = 0;
+    std::vector<int> savedBrickStates;
+    int savedBallLaunched = 0;
     auto TryLoadSaveOnStart = [&]()->void {
         std::ifstream ifs("BrickGame/savegame.json");
         if (!ifs.is_open()) { hasSave = false; return; }
         std::stringstream ss; ss << ifs.rdbuf();
         std::string s = ss.str();
-        // naive parse: find level, score, lives
-        size_t p = s.find("\"level\"");
-        if (p == std::string::npos) { hasSave = false; return; }
+        // check if required fields exist
+        if (s.find("\"level\"") == std::string::npos) { hasSave = false; return; }
         auto readIntAfter = [&](const std::string& key)->int {
             size_t q = s.find(key);
             if (q == std::string::npos) return 0;
@@ -319,6 +332,35 @@ int Run() {
         savedLevel = readIntAfter("\"level\"");
         savedScore = readIntAfter("\"score\"");
         savedLives = readIntAfter("\"lives\"");
+        savedDifficulty = readIntAfter("\"difficulty\"");
+        savedBrickCount = readIntAfter("\"brickCount\"");
+        savedBallLaunched = readIntAfter("\"ballLaunched\"");
+        // Parse brick states array
+        savedBrickStates.clear();
+        size_t startBracket = s.find("\"brickStates\"");
+        if (startBracket != std::string::npos) {
+            size_t openArray = s.find("[", startBracket);
+            size_t closeArray = s.find("]", openArray);
+            if (openArray != std::string::npos && closeArray != std::string::npos) {
+                std::string arrayStr = s.substr(openArray + 1, closeArray - openArray - 1);
+                size_t pos = 0;
+                while (pos < arrayStr.size()) {
+                    size_t nextComma = arrayStr.find(",", pos);
+                    if (nextComma == std::string::npos) nextComma = arrayStr.size();
+                    std::string numStr = arrayStr.substr(pos, nextComma - pos);
+                    // trim whitespace
+                    size_t start = numStr.find_first_not_of(" \t\n\r");
+                    if (start != std::string::npos) {
+                        size_t end = numStr.find_last_not_of(" \t\n\r");
+                        numStr = numStr.substr(start, end - start + 1);
+                    }
+                    if (!numStr.empty()) {
+                        savedBrickStates.push_back(std::stoi(numStr));
+                    }
+                    pos = nextComma + 1;
+                }
+            }
+        }
         hasSave = true;
     };
 
@@ -361,6 +403,12 @@ int Run() {
     float frenzyEndTime = 0.0f;
     float basePaddleWidth = config.paddleWidth;
 
+    // Ball trail effect for offline mode
+    struct TrailPoint { Vector2 pos; float life; };
+    std::map<Ball*, std::vector<TrailPoint>> ballTrails;
+    const float kTrailPointLife = 0.4f;
+    const int kMaxTrailPointsPerBall = 20;
+
     enum class State { Start, Playing, Settings, Victory, GameOver };
     State state = State::Start;
 
@@ -378,6 +426,7 @@ int Run() {
         bricks.clear();
         balls.clear();
         powerUps.clear();
+        ballTrails.clear();
         hostPaddle = nullptr;
         clientPaddle = nullptr;
         localPaddle = nullptr;
@@ -1024,7 +1073,18 @@ int Run() {
                     currentLevel = savedLevel;
                     score = savedScore;
                     lives = savedLives;
+                    selectedDifficulty = (Difficulty)savedDifficulty;
                     CreateGameObjects();
+                    // Restore brick states
+                    if ((int)bricks.size() == savedBrickCount && (int)savedBrickStates.size() == savedBrickCount) {
+                        for (int i = 0; i < (int)bricks.size(); ++i) {
+                            bricks[i]->SetActive(savedBrickStates[i] != 0);
+                        }
+                    }
+                    // Restore ball launch state
+                    if (!balls.empty() && savedBallLaunched != 0) {
+                        balls[0]->Launch();
+                    }
                     state = State::Playing;
                     resumeDialogActive = false;
                     hasSave = false;
@@ -1316,6 +1376,35 @@ int Run() {
                 object->Update();
             }
 
+            // Update ball trails for offline mode
+            if (netMode == NetMode::Offline) {
+                float dt = GetFrameTime();
+                for (Ball* ball : balls) {
+                    if (!ball->IsLaunched()) continue;
+                    
+                    auto& trail = ballTrails[ball];
+                    
+                    // Add current ball position to trail
+                    TrailPoint tp;
+                    tp.pos = ball->GetPosition();
+                    tp.life = kTrailPointLife;
+                    trail.push_back(tp);
+                    
+                    // Remove excess trail points
+                    if ((int)trail.size() > kMaxTrailPointsPerBall) {
+                        trail.erase(trail.begin());
+                    }
+                    
+                    // Decay existing trail points
+                    for (int ti = (int)trail.size() - 1; ti >= 0; --ti) {
+                        trail[ti].life -= dt;
+                        if (trail[ti].life <= 0.0f) {
+                            trail.erase(trail.begin() + ti);
+                        }
+                    }
+                }
+            }
+
             bool launchPressed = launchPressedLocal || (netMode == NetMode::Host && net.remoteLaunchPressed);
             net.remoteLaunchPressed = false;
             if (launchPressed) {
@@ -1485,6 +1574,7 @@ int Run() {
             for (size_t i = 0; i < balls.size();) {
                 Ball* ball = balls[i];
                 if (ball->IsLaunched() && ball->IsOutOfBounds(screenHeight)) {
+                    ballTrails.erase(ball);
                     RemoveObject(ball);
                     delete ball;
                     balls.erase(balls.begin() + (int)i);
@@ -1529,6 +1619,22 @@ int Run() {
 
         for (GameObject* object : objects) {
             object->Draw();
+        }
+
+        // Draw ball trails for offline mode
+        if (netMode == NetMode::Offline) {
+            for (auto& kv : ballTrails) {
+                const auto& trail = kv.second;
+                if (trail.empty()) continue;
+                
+                // Draw trail as gradient circles
+                for (size_t i = 0; i < trail.size(); ++i) {
+                    float alpha = trail[i].life / kTrailPointLife;
+                    float size = 8.0f * (0.4f + alpha * 0.6f);
+                    Color trailColor = Fade(YELLOW, alpha * 0.8f);
+                    DrawCircleV(trail[i].pos, size, trailColor);
+                }
+            }
         }
 
         if (netMode != NetMode::Offline) {

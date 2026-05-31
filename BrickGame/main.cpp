@@ -82,6 +82,15 @@ int main(int argc, char* argv[]) {
     const int avatarCount = 8;
     int selectedLevel = 0;
 
+    // global/simple network-mode effect state (persist across frames)
+    int scoreMultiplier = 1;
+    bool widePaddleActive = false;
+    bool frenzyActive = false;
+    float widePaddleEndTime = 0.0f;
+    float frenzyEndTime = 0.0f;
+    float basePaddleWidth = 100.0f;
+    float ballSpeedFactor = 1.0f;
+
     auto IsValidIPChar = [](int key) {
         return (key >= '0' && key <= '9') || key == '.';
     };
@@ -823,6 +832,72 @@ int main(int argc, char* argv[]) {
             static Rectangle guestPaddle = {420, 540, 100, 20};
             static int hostScore = 0;
             static int hostLives = 3;
+            static bool forceSnapshotNow = false;
+
+            // local bricks / powerups for visual sync
+            static std::vector<Brick*> bricks;
+            static std::vector<PowerUp*> powerUps;
+            // simple particle effects for brick hits (visual only)
+            struct Particle {
+                Vector2 pos;
+                Vector2 vel;
+                float life;
+                Color col;
+                bool active;
+                Particle() : pos({0,0}), vel({0,0}), life(0), col(WHITE), active(false) {}
+            };
+            static std::vector<Particle> particles;
+            const float brickWidth = 60.0f;
+            const float brickHeight = 18.0f;
+            const int wallThickness = 5;
+            const int gapX = 8;
+            const int gapY = 6;
+
+            auto CreateBricksLayout = [&](int exactCount = 0) {
+                // clear existing
+                for (Brick* b : bricks) delete b;
+                bricks.clear();
+                int usableWidth = screenWidth - 2 * wallThickness;
+                int cols = (usableWidth + gapX) / ((int)brickWidth + gapX);
+                if (cols < 1) cols = 1;
+                int totalBricksWidth = cols * (int)brickWidth + (cols - 1) * gapX;
+                float startX = wallThickness + (usableWidth - totalBricksWidth) / 2.0f;
+                float startY = 80.0f;
+                int rowsCount = 5;
+                int created = 0;
+                for (int r = 0; r < rowsCount; ++r) {
+                    for (int c = 0; c < cols; ++c) {
+                        if (exactCount > 0 && created >= exactCount) break;
+                        float x = startX + c * (brickWidth + gapX);
+                        float y = startY + r * (brickHeight + gapY);
+                        Brick* brick = new Brick(x, y, brickWidth, brickHeight, 1);
+                        bricks.push_back(brick);
+                        ++created;
+                    }
+                    if (exactCount > 0 && created >= exactCount) break;
+                }
+            };
+
+            auto ClearPowerUps = [&]() {
+                for (PowerUp* p : powerUps) PowerUpPool::Release(p);
+                powerUps.clear();
+                PowerUpPool::ClearPool();
+            };
+
+            auto SpawnHitParticles = [&](Vector2 at, Color c) {
+                const int N = 12;
+                for (int i = 0; i < N; ++i) {
+                    Particle p;
+                    p.pos = at;
+                    float ax = ((rand() % 200) - 100) / 100.0f;
+                    float ay = ((rand() % 200) - 150) / 100.0f; // more upward
+                    p.vel = { ax * 120.0f, ay * 120.0f };
+                    p.life = 0.7f + (rand() % 300) / 1000.0f;
+                    p.col = c;
+                    p.active = true;
+                    particles.push_back(p);
+                }
+            };
 
             float dt = GetFrameTime();
             if (!gameInitialized) {
@@ -833,6 +908,10 @@ int main(int argc, char* argv[]) {
                 hostPaddle = { screenWidth*0.30f - 50.0f, 540, 100, 20 };
                 guestPaddle = { screenWidth*0.70f - 50.0f, 540, 100, 20 };
                 hostScore = 0; hostLives = 3;
+                // initialize runtime values from globals
+                basePaddleWidth = hostPaddle.width;
+                // create bricks for both host and client visual
+                CreateBricksLayout();
             }
 
             networkGame.Update(dt);
@@ -861,9 +940,14 @@ int main(int argc, char* argv[]) {
                 if (ballPos.x <= 5.0f) { ballPos.x = 5.0f; ballVel.x = fabs(ballVel.x); }
                 if (ballPos.x >= screenWidth - 5.0f) { ballPos.x = screenWidth - 5.0f; ballVel.x = -fabs(ballVel.x); }
                 if (ballPos.y <= 5.0f) { ballPos.y = 5.0f; ballVel.y = fabs(ballVel.y); }
-                if (ballPos.y >= screenHeight - 5.0f) { ballPos.y = screenHeight - 5.0f; hostLives -= 1; if (hostLives>0) { ballPos = {screenWidth*0.5f, screenHeight*0.5f}; ballVel.y = -220.0f; } }
+                if (ballPos.y >= screenHeight - 5.0f) {
+                    // Ball fell below screen: decrement life and reset position/velocity
+                    hostLives -= 1;
+                    ballPos = { screenWidth*0.5f, screenHeight*0.5f };
+                    ballVel = { 190.0f, -220.0f };
+                }
 
-                // collision with paddles
+                // collision with paddles (no brick collisions implemented here — host owns game state in a full implementation)
                 if (CheckCollisionCircleRec(ballPos, 8.0f, hostPaddle)) {
                     ballVel.y = -fabs(ballVel.y);
                     float hit = (ballPos.x - (hostPaddle.x + hostPaddle.width*0.5f)) / (hostPaddle.width*0.5f);
@@ -877,13 +961,121 @@ int main(int argc, char* argv[]) {
                     ballPos.y = guestPaddle.y - 9.0f;
                 }
 
+                // collision with bricks (host authoritative)
+                int bcountLoop = (int)bricks.size();
+                if (bcountLoop > MAX_SYNC_BRICKS) bcountLoop = MAX_SYNC_BRICKS;
+                for (int i = 0; i < bcountLoop; ++i) {
+                    Brick* br = bricks[i];
+                    if (!br->IsActive()) continue;
+                    Rectangle brec = br->GetRect();
+                    if (CheckCollisionCircleRec(ballPos, 8.0f, brec)) {
+                        // deactivate brick and update score
+                        br->SetActive(false);
+                        hostScore += 10;
+
+                        // debug log: brick hit
+                        printf("[Debug] Brick hit index=%d pos=(%.1f,%.1f) ball=(%.1f,%.1f)\n", i, brec.x, brec.y, ballPos.x, ballPos.y);
+                        fflush(stdout);
+
+                        // simple bounce: invert Y velocity and nudge ball out of brick
+                        ballVel.y = -ballVel.y;
+                        if (ballPos.y < brec.y) {
+                            ballPos.y = brec.y - 9.0f;
+                        } else {
+                            ballPos.y = brec.y + brec.height + 9.0f;
+                        }
+
+                        // 30% chance to spawn a powerup at brick center (bounded by MAX_SYNC_POWERUPS)
+                        if ((int)powerUps.size() < MAX_SYNC_POWERUPS) {
+                            int r = rand() % 100;
+                            if (r < 30) {
+                                Vector2 puPos = { brec.x + brec.width * 0.5f, brec.y + brec.height * 0.5f };
+                                // choose random powerup type: SplitBalls, WidePaddle, Frenzy
+                                PowerUpType ptype = PowerUpType::SplitBalls;
+                                int roll = rand() % 3;
+                                if (roll == 1) ptype = PowerUpType::WidePaddle;
+                                else if (roll == 2) ptype = PowerUpType::Frenzy;
+                                PowerUp* p = PowerUpPool::Acquire(puPos, ptype);
+                                powerUps.push_back(p);
+                            }
+                        }
+
+                        // spawn particle effect at hit location
+                        SpawnHitParticles({ ballPos.x, ballPos.y }, ORANGE);
+
+                        // mark to force-send a snapshot so client sees the destroyed brick ASAP
+                        forceSnapshotNow = true;
+
+                        // only one brick hit per frame for simplicity
+                        break;
+                    }
+                }
+
+                // current host time for effect timers
+                float nowt = (float)GetTime();
+
+                // Update powerups on host (falling & pickup by paddles)
+                for (int i = (int)powerUps.size() - 1; i >= 0; --i) {
+                    PowerUp* pu = powerUps[i];
+                    if (!pu) { powerUps.erase(powerUps.begin() + i); continue; }
+                    if (pu->IsActive()) pu->Update();
+
+                    bool pickedByHost = CheckCollisionRecs(pu->GetRect(), hostPaddle);
+                    bool pickedByClient = CheckCollisionRecs(pu->GetRect(), guestPaddle);
+                    if (pickedByHost || pickedByClient) {
+                        PowerUpType type = pu->GetType();
+                        if (type == PowerUpType::SplitBalls) {
+                            // SplitBalls not supported in simplified network mode; ignore or log
+                        }
+                        else if (type == PowerUpType::WidePaddle) {
+                            widePaddleActive = true;
+                            widePaddleEndTime = nowt + 10.0f;
+                            hostPaddle.width = basePaddleWidth * 1.6f;
+                            guestPaddle.width = basePaddleWidth * 1.45f;
+                        }
+                        else if (type == PowerUpType::Frenzy) {
+                            frenzyActive = true;
+                            frenzyEndTime = nowt + 10.0f;
+                            scoreMultiplier = 4;
+                            if (ballSpeedFactor <= 1.0f) {
+                                ballVel.x *= 2.0f; ballVel.y *= 2.0f; ballSpeedFactor = 2.0f;
+                            }
+                        }
+
+                        // remove picked powerup
+                        PowerUpPool::Release(pu);
+                        powerUps.erase(powerUps.begin() + i);
+                        continue;
+                    }
+
+                    if (!pu->IsActive() || pu->IsOutOfScreen(screenHeight)) {
+                        PowerUpPool::Release(pu);
+                        powerUps.erase(powerUps.begin() + i);
+                    }
+                }
+
+                // expire timed effects
+                if (widePaddleActive && nowt >= widePaddleEndTime) {
+                    widePaddleActive = false;
+                    hostPaddle.width = basePaddleWidth;
+                    guestPaddle.width = basePaddleWidth;
+                }
+                if (frenzyActive && nowt >= frenzyEndTime) {
+                    frenzyActive = false;
+                    scoreMultiplier = 1;
+                    if (ballSpeedFactor > 1.0f) {
+                        ballVel.x /= ballSpeedFactor; ballVel.y /= ballSpeedFactor; ballSpeedFactor = 1.0f;
+                    }
+                }
+
                 // send GameState (throttled to 20Hz, include seq)
                 static uint32_t gameStateSeq = 0;
                 static float lastSendStateTime = 0.0f;
+                static bool sentInitialSnapshot = false;
+                static bool forceSnapshotNow = false;
                 GameStateMessage state;
                 state.timestamp = (uint32_t)(GetTime()*1000.0);
-                float nowt = (float)GetTime();
-                const float sendInterval = 1.0f / 20.0f; // 20 Hz
+                const float sendInterval = 1.0f / 30.0f; // 30 Hz for lower perceived latency
                 if (nowt - lastSendStateTime >= sendInterval) {
                     lastSendStateTime = nowt;
                     state.seq = ++gameStateSeq;
@@ -895,23 +1087,46 @@ int main(int argc, char* argv[]) {
                 state.guestPaddle.FromGameObject({guestPaddle.x, guestPaddle.y}, guestPaddle.width, guestPaddle.height);
                 state.hostScore = hostScore; state.guestScore = 0;
                 state.hostLives = hostLives; state.guestLives = 0;
-                state.brickCount = 0; state.powerUpCount = 0; state.widePaddleActive = 0; state.frenzyActive = 0;
-                // Only actually send when we've advanced the seq (throttled)
-                if (state.seq == gameStateSeq && (nowt - lastSendStateTime) < 0.0001f) {
-                    // just-sent in this frame already
+
+                // populate bricks and powerups into snapshot
+                int brickCount = (int)bricks.size();
+                if (brickCount > MAX_SYNC_BRICKS) brickCount = MAX_SYNC_BRICKS;
+                state.brickCount = brickCount;
+                for (int i = 0; i < brickCount; ++i) state.brickActive[i] = bricks[i]->IsActive() ? 1 : 0;
+
+                int pCount = (int)powerUps.size();
+                if (pCount > MAX_SYNC_POWERUPS) pCount = MAX_SYNC_POWERUPS;
+                state.powerUpCount = pCount;
+                for (int i = 0; i < pCount; ++i) {
+                    state.powerUps[i].posX = powerUps[i]->GetPosition().x;
+                    state.powerUps[i].posY = powerUps[i]->GetPosition().y;
+                    state.powerUps[i].type = (uint8_t)powerUps[i]->GetType();
+                    state.powerUps[i].active = powerUps[i]->IsActive() ? 1 : 0;
                 }
-                if ((float)state.seq == (float)gameStateSeq && nowt - lastSendStateTime < 0.0001f) {
-                    // no-op
-                }
+
+                state.widePaddleActive = widePaddleActive ? 1 : 0;
+                state.frenzyActive = frenzyActive ? 1 : 0;
+
                 // Send only when we updated seq this frame (throttle enforcement)
                 if ((uint32_t)state.seq == gameStateSeq && nowt - lastSendStateTime < sendInterval + 0.0001f) {
-                    // Send compact delta most of the time; occasionally send a full snapshot
-                    const uint32_t snapshotInterval = 50; // send full snapshot every 50 updates (~2.5s at 20Hz)
-                    if ((state.seq % snapshotInterval) == 0) {
-                        // send full snapshot
+                    // If a brick was just hit, force-send a snapshot immediately
+                    if (forceSnapshotNow) {
                         networkGame.SendGameStateSnapshot(state);
+                        forceSnapshotNow = false;
+                        sentInitialSnapshot = true;
                     } else {
-                        networkGame.SendGameState(state);
+                    // Ensure clients get an initial authoritative snapshot immediately after game init
+                    if (!sentInitialSnapshot) {
+                        networkGame.SendGameStateSnapshot(state);
+                        sentInitialSnapshot = true;
+                    } else {
+                        const uint32_t snapshotInterval = 25; // send full snapshot every 25 updates (~0.8s at 30Hz)
+                        if ((state.seq % snapshotInterval) == 0) {
+                            networkGame.SendGameStateSnapshot(state);
+                        } else {
+                            networkGame.SendGameState(state);
+                        }
+                    }
                     }
                 }
 
@@ -941,7 +1156,7 @@ int main(int argc, char* argv[]) {
                 }
 
                 // interpolation delay to smooth network jitter
-                const float renderDelay = 0.06f; // 60ms
+                const float renderDelay = 0.03f; // 30ms reduced for lower perceived latency
                 Vector2 interpBall = ballPos;
                 Vector2 interpHostPaddle = { hostPaddle.x, hostPaddle.y };
 
@@ -968,18 +1183,137 @@ int main(int argc, char* argv[]) {
                 // apply interpolated remote values
                 ballPos = interpBall;
                 hostPaddle.x = interpHostPaddle.x;
+
+                // Apply latest snapshot bricks/powerups if available.
+                // Ensure client has a local brick layout like offline mode and only
+                // apply authoritative snapshot data when provided by the host.
+                if (ls.timestamp != 0) {
+                    // Only apply per-brick / per-powerup data when the received game state
+                    // actually contains a full snapshot. Delta updates do not include
+                    // per-brick active arrays and are marked with brickCount == -1.
+                    if (ls.brickCount >= 0) {
+                        // Ensure we have a local bricks layout to render (create if missing)
+                        if (bricks.empty()) CreateBricksLayout(ls.brickCount);
+
+                        // If the layout size differs, recreate local layout to match host snapshot count
+                        if ((int)bricks.size() != ls.brickCount) {
+                            for (Brick* b : bricks) delete b;
+                            bricks.clear();
+                            CreateBricksLayout(ls.brickCount);
+                        }
+
+                        int bc = std::min(ls.brickCount, (int)bricks.size());
+                        for (int i = 0; i < bc; ++i) {
+                            bool prevActive = bricks[i]->IsActive();
+                            bool newActive = ls.brickActive[i] != 0;
+                            bricks[i]->SetActive(newActive);
+                            // if brick was active and now is inactive, show a particle hit effect on client
+                            if (prevActive && !newActive) {
+                                Rectangle brec = bricks[i]->GetRect();
+                                Vector2 at = { brec.x + brec.width * 0.5f, brec.y + brec.height * 0.5f };
+                                SpawnHitParticles(at, ORANGE);
+                            }
+                        }
+                        // Any local bricks beyond the snapshot range should be hidden —
+                        // host may cap snapshots (e.g. MAX_SYNC_BRICKS), so ensure
+                        // extra client-side bricks are marked inactive to avoid visual mismatch.
+                        for (int i = bc; i < (int)bricks.size(); ++i) {
+                            bricks[i]->SetActive(false);
+                        }
+                    }
+
+                    // powerups: host may send full list in snapshots; adapt pool to match
+                    if (ls.powerUpCount > 0) {
+                        int targetPU = std::min(ls.powerUpCount, MAX_SYNC_POWERUPS);
+                        // adjust pool size
+                        while ((int)powerUps.size() > targetPU) {
+                            PowerUpPool::Release(powerUps.back()); powerUps.pop_back();
+                        }
+                        while ((int)powerUps.size() < targetPU) {
+                            PowerUp* p = PowerUpPool::Acquire({0,0}, PowerUpType::SplitBalls);
+                            powerUps.push_back(p);
+                        }
+                        for (int i = 0; i < targetPU; ++i) {
+                            powerUps[i]->SetPosition({ ls.powerUps[i].posX, ls.powerUps[i].posY });
+                            PowerUpType t = (PowerUpType)ls.powerUps[i].type;
+                            powerUps[i]->Reset({ ls.powerUps[i].posX, ls.powerUps[i].posY }, t);
+                            powerUps[i]->SetActive(ls.powerUps[i].active != 0);
+                        }
+                    }
+                    // client: advance local powerups for smooth falling visuals
+                    for (int i = (int)powerUps.size() - 1; i >= 0; --i) {
+                        PowerUp* pu = powerUps[i];
+                        if (!pu) { powerUps.erase(powerUps.begin() + i); continue; }
+                        if (pu->IsActive()) pu->Update();
+                        if (!pu->IsActive() || pu->IsOutOfScreen(screenHeight)) {
+                            PowerUpPool::Release(pu);
+                            powerUps.erase(powerUps.begin() + i);
+                        }
+                    }
+
+                    // Apply host-wide effect flags for client visuals
+                    if (ls.widePaddleActive != 0) {
+                        hostPaddle.width = basePaddleWidth * 1.6f;
+                        guestPaddle.width = basePaddleWidth * 1.45f;
+                    } else {
+                        hostPaddle.width = basePaddleWidth;
+                        guestPaddle.width = basePaddleWidth;
+                    }
+                    // Frenzy visual handled minimally: could tint ball or speed
+                }
             }
 
-            // Render
+                // Render
             BeginDrawing();
             ClearBackground({16,18,28,255});
             DrawText(networkGame.GetMode() == NetworkManager::Mode::HOST ? "Role: HOST" : "Role: CLIENT", 20, 16, 20, GREEN);
+
+            // draw bricks and powerups
+            for (Brick* b : bricks) {
+                b->Draw();
+            }
+            for (PowerUp* p : powerUps) {
+                if (p->IsActive()) p->Draw();
+            }
+
+            // update & draw particles
+            for (int pi = (int)particles.size() - 1; pi >= 0; --pi) {
+                Particle& par = particles[pi];
+                if (!par.active) { particles.erase(particles.begin() + pi); continue; }
+                // physics
+                par.vel.y += 300.0f * dt; // gravity-like
+                par.pos.x += par.vel.x * dt;
+                par.pos.y += par.vel.y * dt;
+                par.life -= dt;
+                float alpha = par.life;
+                if (alpha < 0.0f) alpha = 0.0f;
+                if (par.life <= 0.0f) { par.active = false; particles.erase(particles.begin() + pi); continue; }
+                Color col = par.col;
+                col.a = (unsigned char)(255 * (alpha > 1.0f ? 1.0f : alpha));
+                DrawCircleV(par.pos, 2.0f, col);
+            }
+
             DrawCircleV(ballPos, 8, RED);
+
+            // draw total score
+            const GameStateMessage& lastState = networkGame.GetLastReceivedGameState();
+            int displayHostScore = (networkGame.GetMode() == NetworkManager::Mode::HOST) ? hostScore : lastState.hostScore;
+            int displayGuestScore = (networkGame.GetMode() == NetworkManager::Mode::HOST) ? 0 : lastState.guestScore;
+            char scoreBuf[64];
+            snprintf(scoreBuf, sizeof(scoreBuf), "Score: %d", displayHostScore + displayGuestScore);
+            DrawText(scoreBuf, 20, 40, 20, RAYWHITE);
             DrawRectangleRec(hostPaddle, networkGame.GetMode() == NetworkManager::Mode::HOST ? ORANGE : SKYBLUE);
             DrawRectangleRec(guestPaddle, networkGame.GetMode() == NetworkManager::Mode::CLIENT ? ORANGE : SKYBLUE);
             DrawText("Press ESC to return to menu", 20, 560, 16, Fade(neonCyan,0.8f));
             DrawFPS(10, 10);
             EndDrawing();
+
+            // cleanup when leaving network play
+            if (IsKeyPressed(KEY_ESCAPE)) {
+                for (Brick* b : bricks) delete b; bricks.clear();
+                for (PowerUp* p : powerUps) delete p; powerUps.clear();
+                gameInitialized = false;
+            }
         }
 
         if (IsKeyPressed(KEY_ESCAPE)) {
